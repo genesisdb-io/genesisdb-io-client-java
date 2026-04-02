@@ -54,4 +54,17 @@ public class Precondition {
     public static Precondition isQueryResultTrue(String query) {
         return new Precondition("isQueryResultTrue", Map.of("query", query));
     }
+
+    /**
+     * Creates a generic precondition with a custom type and payload.
+     * This is an escape-hatch for any precondition type that is not yet covered
+     * by the SDK (forward-compatible with future server releases).
+     *
+     * @param type the precondition type
+     * @param payload the precondition payload
+     * @return the precondition
+     */
+    public static Precondition of(String type, Map<String, Object> payload) {
+        return new Precondition(type, payload);
+    }
 }

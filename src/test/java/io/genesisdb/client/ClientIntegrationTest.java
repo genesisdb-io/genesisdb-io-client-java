@@ -14,10 +14,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.*;
 
 /**
- * Integration tests that run against a real Genesis DB instance.
+ * Integration tests that run against a real GenesisDB instance.
  *
  * These tests are disabled by default. To run them, set the following environment variables:
- * - GENESISDB_API_URL: The Genesis DB API URL (e.g., http://localhost:8080)
+ * - GENESISDB_API_URL: The GenesisDB API URL (e.g., http://localhost:8080)
  * - GENESISDB_API_VERSION: The API version (e.g., v1)
  * - GENESISDB_AUTH_TOKEN: A valid authentication token
  *
@@ -32,19 +32,23 @@ class ClientIntegrationTest {
 
     @BeforeAll
     static void setUp() {
-        // Skip all tests if environment variables are not set
+        // Use environment variables if set, otherwise fall back to defaults for local testing
         String apiUrl = System.getenv("GENESISDB_API_URL");
         String apiVersion = System.getenv("GENESISDB_API_VERSION");
         String authToken = System.getenv("GENESISDB_AUTH_TOKEN");
 
-        assumeTrue(apiUrl != null && !apiUrl.isEmpty(),
-                "GENESISDB_API_URL environment variable not set - skipping integration tests");
-        assumeTrue(apiVersion != null && !apiVersion.isEmpty(),
-                "GENESISDB_API_VERSION environment variable not set - skipping integration tests");
-        assumeTrue(authToken != null && !authToken.isEmpty(),
-                "GENESISDB_AUTH_TOKEN environment variable not set - skipping integration tests");
+        if (apiUrl != null && !apiUrl.isEmpty()
+                && apiVersion != null && !apiVersion.isEmpty()
+                && authToken != null && !authToken.isEmpty()) {
+            client = new Client();
+        } else {
+            client = new Client(ClientConfig.builder()
+                    .apiUrl("http://localhost:8080")
+                    .apiVersion("v1")
+                    .authToken("secret")
+                    .build());
+        }
 
-        client = new Client();
         testSubject = "/integration-test/" + UUID.randomUUID();
     }
 
@@ -325,6 +329,136 @@ class ClientIntegrationTest {
 
     @Test
     @Order(15)
+    void streamEvents_withUpperBound_excludesEventsAfterBound() {
+        String boundsSubject = "/integration-test/upper-bound-" + UUID.randomUUID();
+
+        // Commit 3 events
+        for (int i = 1; i <= 3; i++) {
+            client.commitEvents(List.of(
+                    EventData.builder()
+                            .source("io.genesisdb.integration-test")
+                            .subject(boundsSubject)
+                            .type("io.genesisdb.integration-test.event-" + i)
+                            .data(Map.of("order", i))
+                            .build()
+            ));
+        }
+
+        // Get all events to know the IDs
+        List<CloudEvent> allEvents = client.streamEvents(boundsSubject);
+        assertEquals(3, allEvents.size());
+
+        // Stream with upper bound excluding the last event
+        StreamOptions options = StreamOptions.builder()
+                .upperBound(allEvents.get(2).getId())
+                .includeUpperBoundEvent(false)
+                .build();
+
+        List<CloudEvent> bounded = client.streamEvents(boundsSubject, options);
+        assertEquals(2, bounded.size());
+        assertEquals(allEvents.get(0).getId(), bounded.get(0).getId());
+        assertEquals(allEvents.get(1).getId(), bounded.get(1).getId());
+
+        System.out.println("Upper bound streaming works correctly");
+    }
+
+    @Test
+    @Order(16)
+    void streamEvents_withUpperBoundIncluded_includesBoundEvent() {
+        String boundsSubject = "/integration-test/upper-bound-incl-" + UUID.randomUUID();
+
+        // Commit 3 events
+        for (int i = 1; i <= 3; i++) {
+            client.commitEvents(List.of(
+                    EventData.builder()
+                            .source("io.genesisdb.integration-test")
+                            .subject(boundsSubject)
+                            .type("io.genesisdb.integration-test.event-" + i)
+                            .data(Map.of("order", i))
+                            .build()
+            ));
+        }
+
+        List<CloudEvent> allEvents = client.streamEvents(boundsSubject);
+        assertEquals(3, allEvents.size());
+
+        // Stream with upper bound including the bound event
+        StreamOptions options = StreamOptions.builder()
+                .upperBound(allEvents.get(1).getId())
+                .includeUpperBoundEvent(true)
+                .build();
+
+        List<CloudEvent> bounded = client.streamEvents(boundsSubject, options);
+        assertEquals(2, bounded.size());
+        assertEquals(allEvents.get(1).getId(), bounded.get(1).getId());
+
+        System.out.println("Upper bound inclusive streaming works correctly");
+    }
+
+    @Test
+    @Order(17)
+    void streamEvents_withBothBounds_returnsMiddleEvents() {
+        String boundsSubject = "/integration-test/both-bounds-" + UUID.randomUUID();
+
+        // Commit 3 events
+        for (int i = 1; i <= 3; i++) {
+            client.commitEvents(List.of(
+                    EventData.builder()
+                            .source("io.genesisdb.integration-test")
+                            .subject(boundsSubject)
+                            .type("io.genesisdb.integration-test.event-" + i)
+                            .data(Map.of("order", i))
+                            .build()
+            ));
+        }
+
+        List<CloudEvent> allEvents = client.streamEvents(boundsSubject);
+        assertEquals(3, allEvents.size());
+
+        // Stream with both bounds excluding both
+        StreamOptions options = StreamOptions.builder()
+                .lowerBound(allEvents.get(0).getId())
+                .includeLowerBoundEvent(false)
+                .upperBound(allEvents.get(2).getId())
+                .includeUpperBoundEvent(false)
+                .build();
+
+        List<CloudEvent> middle = client.streamEvents(boundsSubject, options);
+        assertEquals(1, middle.size());
+        assertEquals(allEvents.get(1).getId(), middle.get(0).getId());
+
+        System.out.println("Both bounds streaming works correctly");
+    }
+
+    @Test
+    @Order(18)
+    void commitEvents_withGenericPrecondition_isQueryResultTrue() {
+        String genericSubject = "/integration-test/generic-precondition-" + UUID.randomUUID();
+
+        // Use Precondition.of() as the generic escape hatch — same as isQueryResultTrue but via of()
+        assertDoesNotThrow(() -> client.commitEvents(
+                List.of(
+                        EventData.builder()
+                                .source("io.genesisdb.integration-test")
+                                .subject(genericSubject)
+                                .type("io.genesisdb.integration-test.generic-test")
+                                .data(Map.of("test", "data"))
+                                .build()
+                ),
+                List.of(
+                        Precondition.of("isSubjectNew", Map.of("subject", genericSubject))
+                )
+        ));
+
+        // Verify the event was committed
+        List<CloudEvent> events = client.streamEvents(genericSubject);
+        assertEquals(1, events.size());
+
+        System.out.println("Generic precondition (Precondition.of) works correctly");
+    }
+
+    @Test
+    @Order(19)
     void commitEvents_withMultipleEvents_commitsAtomically() {
         String atomicSubject = "/integration-test/atomic-" + UUID.randomUUID();
 
@@ -353,6 +487,51 @@ class ClientIntegrationTest {
 
         List<CloudEvent> streamedEvents = client.streamEvents(atomicSubject);
         assertEquals(3, streamedEvents.size());
+    }
+
+    @Test
+    @Order(20)
+    void commitEvents_withIsQueryResultTrue_precondition() {
+        String querySubject = "/integration-test/query-precondition-" + UUID.randomUUID();
+        String uniqueEmail = "test-" + UUID.randomUUID() + "@example.com";
+
+        // Should succeed: no events with this email exist yet
+        assertDoesNotThrow(() -> client.commitEvents(
+                List.of(
+                        EventData.builder()
+                                .source("io.genesisdb.integration-test")
+                                .subject(querySubject)
+                                .type("io.genesisdb.integration-test.user-created")
+                                .data(Map.of("email", uniqueEmail))
+                                .build()
+                ),
+                List.of(
+                        Precondition.isQueryResultTrue(
+                                "STREAM e FROM events WHERE e.data.email == '" + uniqueEmail + "' MAP COUNT() == 0"
+                        )
+                )
+        ));
+
+        // Should fail: an event with this email now exists
+        GenesisDbException exception = assertThrows(GenesisDbException.class,
+                () -> client.commitEvents(
+                        List.of(
+                                EventData.builder()
+                                        .source("io.genesisdb.integration-test")
+                                        .subject(querySubject)
+                                        .type("io.genesisdb.integration-test.user-created")
+                                        .data(Map.of("email", uniqueEmail))
+                                        .build()
+                        ),
+                        List.of(
+                                Precondition.isQueryResultTrue(
+                                        "STREAM e FROM events WHERE e.data.email == '" + uniqueEmail + "' MAP COUNT() == 0"
+                                )
+                        )
+                ));
+
+        assertTrue(exception.isPreconditionFailed());
+        System.out.println("isQueryResultTrue precondition works correctly");
     }
 
     @Test

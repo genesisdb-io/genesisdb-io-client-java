@@ -29,10 +29,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Client for interacting with Genesis DB.
+ * Client for interacting with GenesisDB.
  * <p>
  * This client provides methods for streaming, committing, observing, and querying events
- * in Genesis DB. It supports both synchronous and asynchronous operations.
+ * in GenesisDB. It supports both synchronous and asynchronous operations.
  * </p>
  *
  * <h2>Configuration</h2>
@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * The client can be configured either through environment variables or programmatically:
  * </p>
  * <ul>
- *   <li>GENESISDB_API_URL - The Genesis DB API URL</li>
+ *   <li>GENESISDB_API_URL - The GenesisDB API URL</li>
  *   <li>GENESISDB_API_VERSION - The API version (e.g., "v1")</li>
  *   <li>GENESISDB_AUTH_TOKEN - The authentication token</li>
  * </ul>
@@ -155,6 +155,12 @@ public class Client {
             if (options.getIncludeLowerBoundEvent() != null) {
                 optionsNode.put("includeLowerBoundEvent", options.getIncludeLowerBoundEvent());
             }
+            if (options.getUpperBound() != null) {
+                optionsNode.put("upperBound", options.getUpperBound());
+            }
+            if (options.getIncludeUpperBoundEvent() != null) {
+                optionsNode.put("includeUpperBoundEvent", options.getIncludeUpperBoundEvent());
+            }
             if (options.getLatestByEventType() != null) {
                 optionsNode.put("latestByEventType", options.getLatestByEventType());
             }
@@ -170,7 +176,7 @@ public class Client {
     }
 
     /**
-     * Commits events to Genesis DB.
+     * Commits events to GenesisDB.
      *
      * @param events the events to commit
      * @throws GenesisDbException if the API request fails
@@ -180,7 +186,7 @@ public class Client {
     }
 
     /**
-     * Commits events to Genesis DB with preconditions.
+     * Commits events to GenesisDB with preconditions.
      *
      * @param events the events to commit
      * @param preconditions optional preconditions to check before committing
@@ -285,6 +291,12 @@ public class Client {
                 if (options.getIncludeLowerBoundEvent() != null) {
                     optionsNode.put("includeLowerBoundEvent", options.getIncludeLowerBoundEvent());
                 }
+                if (options.getUpperBound() != null) {
+                    optionsNode.put("upperBound", options.getUpperBound());
+                }
+                if (options.getIncludeUpperBoundEvent() != null) {
+                    optionsNode.put("includeUpperBoundEvent", options.getIncludeUpperBoundEvent());
+                }
                 if (options.getLatestByEventType() != null) {
                     optionsNode.put("latestByEventType", options.getLatestByEventType());
                 }
@@ -365,7 +377,7 @@ public class Client {
     }
 
     /**
-     * Queries events using GDBQL (Genesis DB Query Language).
+     * Queries events using GDBQL (GenesisDB Query Language).
      *
      * @param query the GDBQL query string
      * @return a list of query results as Maps
@@ -376,7 +388,7 @@ public class Client {
     }
 
     /**
-     * Queries events using GDBQL (Genesis DB Query Language).
+     * Queries events using GDBQL (GenesisDB Query Language).
      * Alias for queryEvents().
      *
      * @param query the GDBQL query string
@@ -398,7 +410,7 @@ public class Client {
     }
 
     /**
-     * Pings the Genesis DB API to check connectivity.
+     * Pings the GenesisDB API to check connectivity.
      *
      * @return the ping response
      * @throws GenesisDbException if the API request fails

@@ -95,4 +95,22 @@ class PreconditionTest {
         assertNotEquals(newPrecondition.getType(), queryPrecondition.getType());
         assertNotEquals(existingPrecondition.getType(), queryPrecondition.getType());
     }
+
+    @Test
+    void of_createsGenericPrecondition() {
+        Precondition precondition = Precondition.of("someCustomFuturePrecondition",
+                java.util.Map.of("foo", "bar", "baz", 123));
+
+        assertEquals("someCustomFuturePrecondition", precondition.getType());
+        assertEquals("bar", precondition.getPayload().get("foo"));
+        assertEquals(123, precondition.getPayload().get("baz"));
+    }
+
+    @Test
+    void of_withEmptyPayload_createsGenericPrecondition() {
+        Precondition precondition = Precondition.of("customType", java.util.Map.of());
+
+        assertEquals("customType", precondition.getType());
+        assertTrue(precondition.getPayload().isEmpty());
+    }
 }

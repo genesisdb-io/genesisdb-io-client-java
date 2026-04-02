@@ -51,15 +51,67 @@ class StreamOptionsTest {
     }
 
     @Test
+    void builder_withUpperBound_createsOptions() {
+        StreamOptions options = StreamOptions.builder()
+                .upperBound("abc-456")
+                .build();
+
+        assertEquals("abc-456", options.getUpperBound());
+        assertNull(options.getIncludeUpperBoundEvent());
+        assertNull(options.getLowerBound());
+        assertNull(options.getLatestByEventType());
+    }
+
+    @Test
+    void builder_withUpperBoundAndInclude_createsOptions() {
+        StreamOptions options = StreamOptions.builder()
+                .upperBound("abc-456")
+                .includeUpperBoundEvent(true)
+                .build();
+
+        assertEquals("abc-456", options.getUpperBound());
+        assertTrue(options.getIncludeUpperBoundEvent());
+    }
+
+    @Test
+    void builder_withIncludeUpperBoundEventFalse_createsOptions() {
+        StreamOptions options = StreamOptions.builder()
+                .upperBound("some-event-id")
+                .includeUpperBoundEvent(false)
+                .build();
+
+        assertFalse(options.getIncludeUpperBoundEvent());
+    }
+
+    @Test
+    void builder_withBothBounds_createsOptions() {
+        StreamOptions options = StreamOptions.builder()
+                .lowerBound("event-id-123")
+                .includeLowerBoundEvent(true)
+                .upperBound("event-id-456")
+                .includeUpperBoundEvent(false)
+                .build();
+
+        assertEquals("event-id-123", options.getLowerBound());
+        assertTrue(options.getIncludeLowerBoundEvent());
+        assertEquals("event-id-456", options.getUpperBound());
+        assertFalse(options.getIncludeUpperBoundEvent());
+    }
+
+    @Test
     void builder_withAllOptions_createsOptions() {
         StreamOptions options = StreamOptions.builder()
                 .lowerBound("event-id-123")
                 .includeLowerBoundEvent(true)
+                .upperBound("event-id-456")
+                .includeUpperBoundEvent(true)
                 .latestByEventType("io.genesisdb.app.event-type")
                 .build();
 
         assertEquals("event-id-123", options.getLowerBound());
         assertTrue(options.getIncludeLowerBoundEvent());
+        assertEquals("event-id-456", options.getUpperBound());
+        assertTrue(options.getIncludeUpperBoundEvent());
         assertEquals("io.genesisdb.app.event-type", options.getLatestByEventType());
     }
 
@@ -69,6 +121,8 @@ class StreamOptionsTest {
 
         assertNull(options.getLowerBound());
         assertNull(options.getIncludeLowerBoundEvent());
+        assertNull(options.getUpperBound());
+        assertNull(options.getIncludeUpperBoundEvent());
         assertNull(options.getLatestByEventType());
     }
 

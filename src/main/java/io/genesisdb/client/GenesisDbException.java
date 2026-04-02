@@ -1,7 +1,7 @@
 package io.genesisdb.client;
 
 /**
- * Exception thrown when Genesis DB API operations fail.
+ * Exception thrown when GenesisDB API operations fail.
  */
 public class GenesisDbException extends RuntimeException {
     private final int statusCode;

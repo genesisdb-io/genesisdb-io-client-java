@@ -9,8 +9,8 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Genesis DB Java SDK</name>
-    <description>Official Java/Kotlin SDK for Genesis DB - an event store database system for building event-driven applications</description>
+    <name>GenesisDB Java SDK</name>
+    <description>Official Java/Kotlin SDK for GenesisDB - an event sourcing database system for building event-driven applications</description>
     <url>https://www.genesisdb.io</url>
 
     <licenses>
@@ -28,6 +28,12 @@
             <organizationUrl>https://www.genesisdb.io</organizationUrl>
         </developer>
     </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/genesisdb/genesisdb-io-client-java.git</connection>
+        <developerConnection>scm:git:ssh://github.com:genesisdb/genesisdb-io-client-java.git</developerConnection>
+        <url>https://github.com/genesisdb/genesisdb-io-client-java</url>
+    </scm>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
@@ -135,6 +141,32 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.2</version>
+            </plugin>
+            <!-- GPG Signing -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Central Portal Publishing -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.6.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>true</autoPublish>
+                </configuration>
             </plugin>
         </plugins>
     </build>

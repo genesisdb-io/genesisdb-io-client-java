@@ -1,7 +1,7 @@
 package io.genesisdb.client;
 
 /**
- * Represents an event to be committed to Genesis DB.
+ * Represents an event to be committed to GenesisDB.
  */
 public class EventData {
     private final String source;

@@ -1,8 +1,8 @@
 # Java/Kotlin SDK
 
-This is the official Java/Kotlin SDK for Genesis DB, an awesome and production ready event store database system for building event-driven apps.
+This is the official Java/Kotlin SDK for GenesisDB, an awesome and production ready event store database system for building event-driven apps.
 
-## Genesis DB Advantages
+## GenesisDB Advantages
 
 * Incredibly fast when reading, fast when writing
 * Easy backup creation and recovery
@@ -11,7 +11,7 @@ This is the official Java/Kotlin SDK for Genesis DB, an awesome and production r
 * Easily accessible via the HTTP interface
 * Auditable. Guarantee database consistency
 * Logging and metrics for Prometheus
-* SQL like query language called Genesis DB Query Language (GDBQL)
+* SQL like query language called GenesisDB Query Language (GDBQL)
 * ...
 
 ## Installation
@@ -54,7 +54,7 @@ GENESISDB_API_VERSION=v1
 ```java
 import io.genesisdb.client.Client;
 
-// Initialize the Genesis DB client (using environment variables)
+// Initialize the GenesisDB client (using environment variables)
 Client client = new Client();
 ```
 
@@ -62,7 +62,7 @@ Client client = new Client();
 ```kotlin
 import io.genesisdb.client.Client
 
-// Initialize the Genesis DB client (using environment variables)
+// Initialize the GenesisDB client (using environment variables)
 val client = Client()
 ```
 
@@ -123,6 +123,46 @@ List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
 val events = client.streamEvents("/", StreamOptions.builder()
     .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
     .includeLowerBoundEvent(true)
+    .build())
+```
+
+### Stream Events with Upper Bound
+
+**Java:**
+```java
+List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build());
+```
+
+**Kotlin:**
+```kotlin
+val events = client.streamEvents("/", StreamOptions.builder()
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build())
+```
+
+### Stream Events with Both Lower and Upper Bounds
+
+**Java:**
+```java
+List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
+    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
+    .includeLowerBoundEvent(true)
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build());
+```
+
+**Kotlin:**
+```kotlin
+val events = client.streamEvents("/", StreamOptions.builder()
+    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
+    .includeLowerBoundEvent(true)
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
     .build())
 ```
 
@@ -248,7 +288,7 @@ client.commitEvents(listOf(
 
 ## Preconditions
 
-Preconditions allow you to enforce certain checks on the server before committing events. Genesis DB supports multiple precondition types:
+Preconditions allow you to enforce certain checks on the server before committing events. GenesisDB supports multiple precondition types:
 
 ### isSubjectNew
 Ensures that a subject is new (has no existing events):
@@ -405,6 +445,38 @@ client.commitEvents(listOf(
 
 If a precondition fails, the commit throws a `GenesisDbException` with HTTP 412 (Precondition Failed). You can check this with `exception.isPreconditionFailed()`.
 
+### Generic Precondition (Forward Compatibility)
+
+For precondition types not yet covered by the SDK (forward-compatible with future server releases), use `Precondition.of()`:
+
+**Java:**
+```java
+client.commitEvents(List.of(
+    EventData.builder()
+        .source("io.genesisdb.app")
+        .subject("/test")
+        .type("io.genesisdb.app.test-created")
+        .data(Map.of("key", "value"))
+        .build()
+), List.of(
+    Precondition.of("customPreconditionType", Map.of("param", "value"))
+));
+```
+
+**Kotlin:**
+```kotlin
+client.commitEvents(listOf(
+    EventData.builder()
+        .source("io.genesisdb.app")
+        .subject("/test")
+        .type("io.genesisdb.app.test-created")
+        .data(mapOf("key" to "value"))
+        .build()
+), listOf(
+    Precondition.of("customPreconditionType", mapOf("param" to "value"))
+))
+```
+
 ## GDPR Compliance
 
 ### Store Data as Reference
@@ -506,6 +578,56 @@ client.observeEvents("/customer", StreamOptions.builder()
 client.observeEvents("/customer", StreamOptions.builder()
     .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
     .includeLowerBoundEvent(true)
+    .build()
+) { event ->
+    println("Received event: $event")
+}
+```
+
+### Observe Events with Upper Bound (Message Queue)
+
+**Java:**
+```java
+client.observeEvents("/customer", StreamOptions.builder()
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build(),
+    event -> System.out.println("Received event: " + event)
+);
+```
+
+**Kotlin:**
+```kotlin
+client.observeEvents("/customer", StreamOptions.builder()
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build()
+) { event ->
+    println("Received event: $event")
+}
+```
+
+### Observe Events with Both Bounds (Message Queue)
+
+**Java:**
+```java
+client.observeEvents("/customer", StreamOptions.builder()
+    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
+    .includeLowerBoundEvent(true)
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
+    .build(),
+    event -> System.out.println("Received event: " + event)
+);
+```
+
+**Kotlin:**
+```kotlin
+client.observeEvents("/customer", StreamOptions.builder()
+    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
+    .includeLowerBoundEvent(true)
+    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
+    .includeUpperBoundEvent(false)
     .build()
 ) { event ->
     println("Received event: $event")

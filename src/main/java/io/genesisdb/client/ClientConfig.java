@@ -1,7 +1,7 @@
 package io.genesisdb.client;
 
 /**
- * Configuration for the Genesis DB client.
+ * Configuration for the GenesisDB client.
  * Values can be provided directly or will be read from environment variables.
  */
 public class ClientConfig {
@@ -47,7 +47,7 @@ public class ClientConfig {
         /**
          * Sets the API URL.
          *
-         * @param apiUrl the Genesis DB API URL
+         * @param apiUrl the GenesisDB API URL
          * @return this builder
          */
         public Builder apiUrl(String apiUrl) {

@@ -139,6 +139,48 @@ class ClientTest {
     }
 
     @Test
+    void streamEvents_withUpperBound_sendsOptions() {
+        stubFor(post(urlEqualTo("/api/v1/stream"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withBody("")));
+
+        StreamOptions options = StreamOptions.builder()
+                .upperBound("abc-456")
+                .includeUpperBoundEvent(false)
+                .build();
+
+        client.streamEvents("/", options);
+
+        verify(postRequestedFor(urlEqualTo("/api/v1/stream"))
+                .withRequestBody(containing("\"upperBound\":\"abc-456\""))
+                .withRequestBody(containing("\"includeUpperBoundEvent\":false")));
+    }
+
+    @Test
+    void streamEvents_withBothBounds_sendsOptions() {
+        stubFor(post(urlEqualTo("/api/v1/stream"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withBody("")));
+
+        StreamOptions options = StreamOptions.builder()
+                .lowerBound("event-id-123")
+                .includeLowerBoundEvent(true)
+                .upperBound("event-id-456")
+                .includeUpperBoundEvent(true)
+                .build();
+
+        client.streamEvents("/", options);
+
+        verify(postRequestedFor(urlEqualTo("/api/v1/stream"))
+                .withRequestBody(containing("\"lowerBound\":\"event-id-123\""))
+                .withRequestBody(containing("\"includeLowerBoundEvent\":true"))
+                .withRequestBody(containing("\"upperBound\":\"event-id-456\""))
+                .withRequestBody(containing("\"includeUpperBoundEvent\":true")));
+    }
+
+    @Test
     void streamEvents_withEmptyResponse_returnsEmptyList() {
         stubFor(post(urlEqualTo("/api/v1/stream"))
                 .willReturn(aResponse()
@@ -349,6 +391,30 @@ class ClientTest {
                 .withRequestBody(containing("isQueryResultTrue")));
     }
 
+    @Test
+    void commitEvents_withGenericPrecondition_sendsPrecondition() {
+        stubFor(post(urlEqualTo("/api/v1/commit"))
+                .willReturn(aResponse().withStatus(200)));
+
+        client.commitEvents(
+                List.of(
+                        EventData.builder()
+                                .source("io.genesisdb.app")
+                                .subject("/test")
+                                .type("io.genesisdb.app.test-created")
+                                .data(Map.of("test", true))
+                                .build()
+                ),
+                List.of(
+                        Precondition.of("someCustomFuturePrecondition", Map.of("foo", "bar", "baz", 123))
+                )
+        );
+
+        verify(postRequestedFor(urlEqualTo("/api/v1/commit"))
+                .withRequestBody(containing("\"type\":\"someCustomFuturePrecondition\""))
+                .withRequestBody(containing("\"foo\":\"bar\"")));
+    }
+
     // ==================== eraseData Tests ====================
 
     @Test
@@ -538,6 +604,32 @@ class ClientTest {
         verify(postRequestedFor(urlEqualTo("/api/v1/observe"))
                 .withRequestBody(containing("\"lowerBound\":\"event-id-123\""))
                 .withRequestBody(containing("\"includeLowerBoundEvent\":true")));
+    }
+
+    @Test
+    void observeEvents_withUpperBound_sendsOptions() throws InterruptedException {
+        stubFor(post(urlEqualTo("/api/v1/observe"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withBody("")));
+
+        StreamOptions options = StreamOptions.builder()
+                .lowerBound("event-id-123")
+                .includeLowerBoundEvent(true)
+                .upperBound("event-id-456")
+                .includeUpperBoundEvent(false)
+                .build();
+
+        Client.ObserveHandle handle = client.observeEvents("/customer", options, event -> {});
+
+        Thread.sleep(100);
+        handle.stop();
+
+        verify(postRequestedFor(urlEqualTo("/api/v1/observe"))
+                .withRequestBody(containing("\"lowerBound\":\"event-id-123\""))
+                .withRequestBody(containing("\"includeLowerBoundEvent\":true"))
+                .withRequestBody(containing("\"upperBound\":\"event-id-456\""))
+                .withRequestBody(containing("\"includeUpperBoundEvent\":false")));
     }
 
     @Test
