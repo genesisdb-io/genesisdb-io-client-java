@@ -1,600 +1,345 @@
 package io.genesisdb.client;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.cloudevents.CloudEvent;
-import io.cloudevents.core.builder.CloudEventBuilder;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
- * Client for interacting with GenesisDB.
- * <p>
- * This client provides methods for streaming, committing, observing, and querying events
- * in GenesisDB. It supports both synchronous and asynchronous operations.
- * </p>
+ * Client for GenesisDB.
  *
- * <h2>Configuration</h2>
- * <p>
- * The client can be configured either through environment variables or programmatically:
- * </p>
- * <ul>
- *   <li>GENESISDB_API_URL - The GenesisDB API URL</li>
- *   <li>GENESISDB_API_VERSION - The API version (e.g., "v1")</li>
- *   <li>GENESISDB_AUTH_TOKEN - The authentication token</li>
- * </ul>
- *
- * <h2>Example Usage</h2>
  * <pre>{@code
- * // Using environment variables
- * Client client = new Client();
- *
- * // Using explicit configuration
- * Client client = new Client(ClientConfig.builder()
- *     .apiUrl("http://localhost:8080")
- *     .apiVersion("v1")
- *     .authToken("your-token")
- *     .build());
+ * Client db = Client.builder().url("http://localhost:8080").token(System.getenv("GENESISDB_AUTH_TOKEN")).build();
+ * db.commit(List.of(new NewEvent("app", "/customer/1", "customer.created", Map.of("name", "Bruce"))));
+ * List<Event> events = db.fetch("/customer");
  * }</pre>
+ *
+ * {@code url} and {@code token} fall back to GENESISDB_URL and GENESISDB_AUTH_TOKEN. Every method throws
+ * {@link GenesisDbException} (or a subclass) on a non-2xx answer. Thread-safe.
  */
-public class Client {
-    private static final String USER_AGENT = "genesisdb-sdk";
-    private static final String ENV_API_URL = "GENESISDB_API_URL";
-    private static final String ENV_API_VERSION = "GENESISDB_API_VERSION";
-    private static final String ENV_AUTH_TOKEN = "GENESISDB_AUTH_TOKEN";
+public final class Client {
+    static final String USER_AGENT = "genesisdb-java/2";
+    private static final String HEARTBEAT = "{\"payload\":\"\"}";
 
-    private final String apiUrl;
-    private final String apiVersion;
-    private final String authToken;
-    private final ObjectMapper objectMapper;
-    private final ExecutorService executor;
+    private final String url;
+    private final String token;
+    private final Duration timeout;
+    private final HttpClient http;
 
-    /**
-     * Creates a new client using environment variables for configuration.
-     *
-     * @throws IllegalStateException if required environment variables are missing
-     */
-    public Client() {
-        this(null);
+    private Client(Builder b) {
+        String url = firstNonEmpty(b.url, System.getenv("GENESISDB_URL"));
+        String token = firstNonEmpty(b.token, System.getenv("GENESISDB_AUTH_TOKEN"));
+        if (url == null) {
+            throw new IllegalArgumentException("GenesisDB URL missing: call url() or set GENESISDB_URL");
+        }
+        if (token == null) {
+            throw new IllegalArgumentException("GenesisDB token missing: call token() or set GENESISDB_AUTH_TOKEN");
+        }
+        this.url = url.replaceAll("/+$", "");
+        this.token = token;
+        this.timeout = b.timeout;
+        this.http = b.http != null ? b.http : HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
-    /**
-     * Creates a new client with the specified configuration.
-     * Falls back to environment variables for any missing configuration values.
-     *
-     * @param config the client configuration, or null to use only environment variables
-     * @throws IllegalStateException if required configuration is missing
-     */
-    public Client(ClientConfig config) {
-        String envApiUrl = System.getenv(ENV_API_URL);
-        String envApiVersion = System.getenv(ENV_API_VERSION);
-        String envAuthToken = System.getenv(ENV_AUTH_TOKEN);
-
-        if (config != null) {
-            this.apiUrl = config.getApiUrl() != null ? config.getApiUrl() : envApiUrl;
-            this.apiVersion = config.getApiVersion() != null ? config.getApiVersion() : envApiVersion;
-            this.authToken = config.getAuthToken() != null ? config.getAuthToken() : envAuthToken;
-        } else {
-            this.apiUrl = envApiUrl;
-            this.apiVersion = envApiVersion;
-            this.authToken = envAuthToken;
-        }
-
-        checkRequiredConfig();
-        this.objectMapper = new ObjectMapper();
-        this.executor = Executors.newCachedThreadPool();
+    private static String firstNonEmpty(String a, String b) {
+        if (a != null && !a.isEmpty()) return a;
+        if (b != null && !b.isEmpty()) return b;
+        return null;
     }
 
-    private void checkRequiredConfig() {
-        List<String> missing = new ArrayList<>();
-        if (apiUrl == null || apiUrl.isEmpty()) {
-            missing.add(ENV_API_URL);
-        }
-        if (apiVersion == null || apiVersion.isEmpty()) {
-            missing.add(ENV_API_VERSION);
-        }
-        if (authToken == null || authToken.isEmpty()) {
-            missing.add(ENV_AUTH_TOKEN);
-        }
-        if (!missing.isEmpty()) {
-            throw new IllegalStateException("Missing required configuration: " + String.join(", ", missing));
-        }
+    public static Builder builder() {
+        return new Builder();
     }
 
-    /**
-     * Streams all events for a subject.
-     *
-     * @param subject the subject to stream events for
-     * @return a list of CloudEvents
-     * @throws GenesisDbException if the API request fails
-     */
-    public List<CloudEvent> streamEvents(String subject) {
-        return streamEvents(subject, null);
+    /** Client from GENESISDB_URL and GENESISDB_AUTH_TOKEN. */
+    public static Client fromEnv() {
+        return builder().build();
     }
 
-    /**
-     * Streams events for a subject with options.
-     *
-     * @param subject the subject to stream events for
-     * @param options streaming options (lowerBound, includeLowerBoundEvent, latestByEventType)
-     * @return a list of CloudEvents
-     * @throws GenesisDbException if the API request fails
-     */
-    public List<CloudEvent> streamEvents(String subject, StreamOptions options) {
-        String url = apiUrl + "/api/" + apiVersion + "/stream";
+    public static final class Builder {
+        private String url;
+        private String token;
+        private Duration timeout = Duration.ofSeconds(30);
+        private HttpClient http;
 
-        ObjectNode requestBody = objectMapper.createObjectNode();
-        requestBody.put("subject", subject);
-
-        if (options != null) {
-            ObjectNode optionsNode = objectMapper.createObjectNode();
-            if (options.getLowerBound() != null) {
-                optionsNode.put("lowerBound", options.getLowerBound());
-            }
-            if (options.getIncludeLowerBoundEvent() != null) {
-                optionsNode.put("includeLowerBoundEvent", options.getIncludeLowerBoundEvent());
-            }
-            if (options.getUpperBound() != null) {
-                optionsNode.put("upperBound", options.getUpperBound());
-            }
-            if (options.getIncludeUpperBoundEvent() != null) {
-                optionsNode.put("includeUpperBoundEvent", options.getIncludeUpperBoundEvent());
-            }
-            if (options.getLatestByEventType() != null) {
-                optionsNode.put("latestByEventType", options.getLatestByEventType());
-            }
-            requestBody.set("options", optionsNode);
+        /** Base URL, for example http://localhost:8080. Falls back to GENESISDB_URL. */
+        public Builder url(String url) {
+            this.url = url;
+            return this;
         }
 
-        try {
-            String response = doPost(url, requestBody.toString(), "application/x-ndjson");
-            return parseNdjsonEvents(response);
-        } catch (IOException e) {
-            throw new GenesisDbException("Error while streaming events", e);
+        /** Bearer token. Falls back to GENESISDB_AUTH_TOKEN. */
+        public Builder token(String token) {
+            this.token = token;
+            return this;
+        }
+
+        /** Timeout for non-streaming calls. Default 30 s. Null disables. Subscriptions never time out. */
+        public Builder timeout(Duration timeout) {
+            this.timeout = timeout;
+            return this;
+        }
+
+        /** Bring your own HttpClient (proxies, TLS, executor). */
+        public Builder http(HttpClient http) {
+            this.http = http;
+            return this;
+        }
+
+        public Client build() {
+            return new Client(this);
         }
     }
 
-    /**
-     * Commits events to GenesisDB.
-     *
-     * @param events the events to commit
-     * @throws GenesisDbException if the API request fails
-     */
-    public void commitEvents(List<EventData> events) {
-        commitEvents(events, null);
-    }
+    // Health and status
 
-    /**
-     * Commits events to GenesisDB with preconditions.
-     *
-     * @param events the events to commit
-     * @param preconditions optional preconditions to check before committing
-     * @throws GenesisDbException if the API request fails or preconditions fail (HTTP 412)
-     */
-    public void commitEvents(List<EventData> events, List<Precondition> preconditions) {
-        String url = apiUrl + "/api/" + apiVersion + "/commit";
-
-        ObjectNode requestBody = objectMapper.createObjectNode();
-        ArrayNode eventsArray = objectMapper.createArrayNode();
-
-        for (EventData event : events) {
-            ObjectNode eventNode = objectMapper.createObjectNode();
-            eventNode.put("source", event.getSource());
-            eventNode.put("subject", event.getSubject());
-            eventNode.put("type", event.getType());
-            eventNode.set("data", objectMapper.valueToTree(event.getData()));
-
-            if (event.getOptions() != null && event.getOptions().getStoreDataAsReference() != null) {
-                ObjectNode optionsNode = objectMapper.createObjectNode();
-                optionsNode.put("storeDataAsReference", event.getOptions().getStoreDataAsReference());
-                eventNode.set("options", optionsNode);
-            }
-
-            eventsArray.add(eventNode);
-        }
-        requestBody.set("events", eventsArray);
-
-        if (preconditions != null && !preconditions.isEmpty()) {
-            ArrayNode preconditionsArray = objectMapper.createArrayNode();
-            for (Precondition precondition : preconditions) {
-                ObjectNode preconditionNode = objectMapper.createObjectNode();
-                preconditionNode.put("type", precondition.getType());
-                preconditionNode.set("payload", objectMapper.valueToTree(precondition.getPayload()));
-                preconditionsArray.add(preconditionNode);
-            }
-            requestBody.set("preconditions", preconditionsArray);
-        }
-
-        try {
-            doPost(url, requestBody.toString(), null);
-        } catch (IOException e) {
-            throw new GenesisDbException("Error while committing events", e);
-        }
-    }
-
-    /**
-     * Erases data for a subject (GDPR compliance).
-     * Only works for events that were committed with storeDataAsReference option.
-     *
-     * @param subject the subject to erase data for
-     * @throws GenesisDbException if the API request fails
-     */
-    public void eraseData(String subject) {
-        String url = apiUrl + "/api/" + apiVersion + "/erase";
-
-        ObjectNode requestBody = objectMapper.createObjectNode();
-        requestBody.put("subject", subject);
-
-        try {
-            doPost(url, requestBody.toString(), null);
-        } catch (IOException e) {
-            throw new GenesisDbException("Error while erasing data", e);
-        }
-    }
-
-    /**
-     * Observes events for a subject in real-time.
-     * This method blocks and calls the observer for each received event.
-     *
-     * @param subject the subject to observe
-     * @param observer the callback to receive events
-     * @return an ObserveHandle to control the observation
-     */
-    public ObserveHandle observeEvents(String subject, EventObserver observer) {
-        return observeEvents(subject, null, observer);
-    }
-
-    /**
-     * Observes events for a subject in real-time with options.
-     * This method blocks and calls the observer for each received event.
-     *
-     * @param subject the subject to observe
-     * @param options streaming options (lowerBound, includeLowerBoundEvent, latestByEventType)
-     * @param observer the callback to receive events
-     * @return an ObserveHandle to control the observation
-     */
-    public ObserveHandle observeEvents(String subject, StreamOptions options, EventObserver observer) {
-        AtomicBoolean running = new AtomicBoolean(true);
-
-        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-            String url = apiUrl + "/api/" + apiVersion + "/observe";
-
-            ObjectNode requestBody = objectMapper.createObjectNode();
-            requestBody.put("subject", subject);
-
-            if (options != null) {
-                ObjectNode optionsNode = objectMapper.createObjectNode();
-                if (options.getLowerBound() != null) {
-                    optionsNode.put("lowerBound", options.getLowerBound());
-                }
-                if (options.getIncludeLowerBoundEvent() != null) {
-                    optionsNode.put("includeLowerBoundEvent", options.getIncludeLowerBoundEvent());
-                }
-                if (options.getUpperBound() != null) {
-                    optionsNode.put("upperBound", options.getUpperBound());
-                }
-                if (options.getIncludeUpperBoundEvent() != null) {
-                    optionsNode.put("includeUpperBoundEvent", options.getIncludeUpperBoundEvent());
-                }
-                if (options.getLatestByEventType() != null) {
-                    optionsNode.put("latestByEventType", options.getLatestByEventType());
-                }
-                requestBody.set("options", optionsNode);
-            }
-
-            HttpURLConnection conn = null;
-            try {
-                URL urlObj = new URL(url);
-                conn = (HttpURLConnection) urlObj.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("Authorization", "Bearer " + authToken);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Accept", "application/x-ndjson");
-                conn.setRequestProperty("User-Agent", USER_AGENT);
-                conn.setDoOutput(true);
-                conn.setDoInput(true);
-                conn.setReadTimeout(0); // No timeout for streaming
-
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
-                }
-
-                int responseCode = conn.getResponseCode();
-                if (responseCode != HttpURLConnection.HTTP_OK) {
-                    throw new GenesisDbException(responseCode, conn.getResponseMessage());
-                }
-
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while (running.get() && (line = reader.readLine()) != null) {
-                        line = line.trim();
-                        if (line.isEmpty()) continue;
-
-                        // Handle SSE format
-                        if (line.startsWith("data: ")) {
-                            line = line.substring(6);
-                        }
-
-                        try {
-                            JsonNode json = objectMapper.readTree(line);
-                            // Skip heartbeat messages
-                            if (json.has("payload") && json.get("payload").asText().isEmpty()
-                                    && json.size() == 1) {
-                                continue;
-                            }
-                            CloudEvent event = jsonToCloudEvent(json);
-                            observer.onEvent(event);
-                        } catch (JsonProcessingException e) {
-                            System.err.println("Error parsing event: " + e.getMessage());
-                            System.err.println("Problem with JSON: " + line);
-                        }
-                    }
-                }
-            } catch (IOException e) {
-                if (running.get()) {
-                    throw new GenesisDbException("Error while observing events", e);
-                }
-            } finally {
-                if (conn != null) {
-                    conn.disconnect();
-                }
-            }
-        }, executor);
-
-        return new ObserveHandle() {
-            @Override
-            public void stop() {
-                running.set(false);
-            }
-
-            @Override
-            public CompletableFuture<Void> getFuture() {
-                return future;
-            }
-        };
-    }
-
-    /**
-     * Queries events using GDBQL (GenesisDB Query Language).
-     *
-     * @param query the GDBQL query string
-     * @return a list of query results as Maps
-     * @throws GenesisDbException if the API request fails
-     */
-    public List<Map<String, Object>> queryEvents(String query) {
-        return q(query);
-    }
-
-    /**
-     * Queries events using GDBQL (GenesisDB Query Language).
-     * Alias for queryEvents().
-     *
-     * @param query the GDBQL query string
-     * @return a list of query results as Maps
-     * @throws GenesisDbException if the API request fails
-     */
-    public List<Map<String, Object>> q(String query) {
-        String url = apiUrl + "/api/" + apiVersion + "/q";
-
-        ObjectNode requestBody = objectMapper.createObjectNode();
-        requestBody.put("query", query);
-
-        try {
-            String response = doPost(url, requestBody.toString(), "application/x-ndjson");
-            return parseNdjsonResults(response);
-        } catch (IOException e) {
-            throw new GenesisDbException("Error while querying events", e);
-        }
-    }
-
-    /**
-     * Pings the GenesisDB API to check connectivity.
-     *
-     * @return the ping response
-     * @throws GenesisDbException if the API request fails
-     */
+    /** Liveness check. Needs no token on the server. Returns "Pong". */
     public String ping() {
-        String url = apiUrl + "/api/" + apiVersion + "/status/ping";
-        try {
-            return doGet(url, "text/plain");
-        } catch (IOException e) {
-            throw new GenesisDbException("Error while pinging", e);
-        }
+        return text("ping", "GET", "/ping", null);
     }
 
-    /**
-     * Runs an audit to check event consistency.
-     *
-     * @return the audit response
-     * @throws GenesisDbException if the API request fails
-     */
+    /** Engine version, host, event counts, storage format and readiness. */
+    public Status status() {
+        return new Status(json("status", "GET", "/api/v1/status", null));
+    }
+
+    /** Verify the hash chain of the whole store. Administrator token. Returns the audit text. */
     public String audit() {
-        String url = apiUrl + "/api/" + apiVersion + "/status/audit";
+        return text("audit", "GET", "/api/v1/status/audit", null);
+    }
+
+    // Events
+
+    /** Commit events atomically. Returns the stored events. */
+    public List<Event> commit(List<NewEvent> events) {
+        return commit(events, Collections.emptyList());
+    }
+
+    /**
+     * Commit events atomically after checking the preconditions. Returns the stored events.
+     * A failed precondition throws {@link PreconditionFailedException} and writes nothing.
+     */
+    public List<Event> commit(List<NewEvent> events, List<Precondition> preconditions) {
+        if (events == null || events.isEmpty()) {
+            throw new IllegalArgumentException("commit requires at least one event");
+        }
+        ObjectNode body = Json.MAPPER.createObjectNode();
+        body.set("events", Json.MAPPER.valueToTree(events));
+        if (preconditions != null && !preconditions.isEmpty()) {
+            body.set("preconditions", Json.MAPPER.valueToTree(preconditions));
+        }
+        return ndjson("commit", "POST", "/api/v1/commit", body, Event.class);
+    }
+
+    /** Fetch the events of a subject and all of its descendants, in commit order. */
+    public List<Event> fetch(String subject) {
+        return fetch(subject, null);
+    }
+
+    public List<Event> fetch(String subject, FetchOptions options) {
+        return ndjson("fetch", "POST", "/api/v1/fetch", fetchBody(subject, options), Event.class);
+    }
+
+    /**
+     * Subscribe to a subject and its descendants. Calls the consumer with the history first, then with new events as
+     * they are committed. Blocks until the server ends the stream or the calling thread is interrupted. A stream the
+     * server ends with an error throws {@link GenesisDbException}. Run it on its own thread and interrupt it to stop.
+     */
+    public void subscribe(String subject, SubscribeOptions options, Consumer<Event> consumer) {
+        SubscribeOptions resolved = options == null ? new SubscribeOptions() : options;
+        ObjectNode body = fetchBody(subject, resolved.getFetch());
+        if (resolved.getInterval() != null) {
+            body.put("interval", resolved.getInterval().toNanos() / 1_000_000_000.0);
+        }
+        HttpRequest request = request("POST", "/api/v1/subscribe", body, null);
+        HttpResponse<InputStream> response;
         try {
-            return doGet(url, "text/plain");
+            response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
         } catch (IOException e) {
-            throw new GenesisDbException("Error while running audit", e);
+            throw new GenesisDbException("subscribe", e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
         }
-    }
-
-    /**
-     * Closes the client and releases resources.
-     */
-    public void close() {
-        executor.shutdown();
-    }
-
-    private String doGet(String urlString, String accept) throws IOException {
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Authorization", "Bearer " + authToken);
-        conn.setRequestProperty("Content-Type", accept);
-        conn.setRequestProperty("User-Agent", USER_AGENT);
-
-        int responseCode = conn.getResponseCode();
-        if (responseCode != HttpURLConnection.HTTP_OK) {
-            throw new GenesisDbException(responseCode, conn.getResponseMessage());
-        }
-
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            StringBuilder response = new StringBuilder();
+        try (InputStream in = response.body()) {
+            if (response.statusCode() != 200) {
+                throw GenesisDbException.forResponse("subscribe", response.statusCode(), new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            String eventName = "";
             String line;
             while ((line = reader.readLine()) != null) {
-                response.append(line);
+                if (Thread.currentThread().isInterrupted()) {
+                    return;
+                }
+                if (line.startsWith("event: ")) {
+                    eventName = line.substring(7).trim();
+                    continue;
+                }
+                if (!line.startsWith("data: ")) {
+                    eventName = "";
+                    continue;
+                }
+                String payload = line.substring(6);
+                if (eventName.equals("error")) {
+                    String message = payload;
+                    try {
+                        JsonNode parsed = Json.MAPPER.readTree(payload);
+                        if (parsed.hasNonNull("error")) message = parsed.get("error").asText();
+                    } catch (IOException ignored) {
+                        // keep the raw payload
+                    }
+                    throw new GenesisDbException("subscribe ended", 200, message);
+                }
+                eventName = "";
+                if (payload.trim().equals(HEARTBEAT)) {
+                    continue;
+                }
+                consumer.accept(Json.MAPPER.readValue(payload, Event.class));
             }
-            return response.toString();
-        } finally {
-            conn.disconnect();
+        } catch (IOException e) {
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
+            throw new GenesisDbException("subscribe", e.getMessage(), e);
         }
     }
 
-    private String doPost(String urlString, String body, String accept) throws IOException {
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Authorization", "Bearer " + authToken);
-        conn.setRequestProperty("Content-Type", "application/json");
-        if (accept != null) {
-            conn.setRequestProperty("Accept", accept);
-        }
-        conn.setRequestProperty("User-Agent", USER_AGENT);
-        conn.setDoOutput(true);
-
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(body.getBytes(StandardCharsets.UTF_8));
-        }
-
-        int responseCode = conn.getResponseCode();
-        if (responseCode != HttpURLConnection.HTTP_OK) {
-            throw new GenesisDbException(responseCode, conn.getResponseMessage());
-        }
-
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            StringBuilder response = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line).append("\n");
-            }
-            return response.toString();
-        } finally {
-            conn.disconnect();
-        }
+    /** Run a GDBQL query. Returns the result rows, or a single-element list for a bare aggregate. */
+    public List<JsonNode> query(String query) {
+        return ndjson("query", "POST", "/api/v1/query", Json.MAPPER.createObjectNode().put("query", query), JsonNode.class);
     }
 
-    private List<CloudEvent> parseNdjsonEvents(String ndjson) {
-        List<CloudEvent> events = new ArrayList<>();
-        if (ndjson == null || ndjson.trim().isEmpty()) {
-            return events;
-        }
-
-        String[] lines = ndjson.split("\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) continue;
-
-            try {
-                JsonNode json = objectMapper.readTree(line);
-                CloudEvent event = jsonToCloudEvent(json);
-                events.add(event);
-            } catch (JsonProcessingException e) {
-                System.err.println("Error parsing event: " + e.getMessage());
-                System.err.println("Problem with JSON: " + line);
-            }
-        }
-
-        return events;
+    /** Run a GDBQL query and decode every row into the given type. */
+    public <T> List<T> query(String query, Class<T> rowType) {
+        return ndjson("query", "POST", "/api/v1/query", Json.MAPPER.createObjectNode().put("query", query), rowType);
     }
 
-    private CloudEvent jsonToCloudEvent(JsonNode json) {
-        CloudEventBuilder builder = CloudEventBuilder.v1()
-                .withId(json.has("id") ? json.get("id").asText() : "")
-                .withSource(URI.create(json.has("source") ? json.get("source").asText() : ""))
-                .withType(json.has("type") ? json.get("type").asText() : "");
-
-        if (json.has("subject")) {
-            builder.withSubject(json.get("subject").asText());
-        }
-        if (json.has("time")) {
-            builder.withTime(OffsetDateTime.parse(json.get("time").asText()));
-        }
-        if (json.has("datacontenttype")) {
-            builder.withDataContentType(json.get("datacontenttype").asText());
-        }
-        if (json.has("data")) {
-            try {
-                byte[] dataBytes = objectMapper.writeValueAsBytes(json.get("data"));
-                builder.withData("application/json", dataBytes);
-            } catch (JsonProcessingException e) {
-                // Ignore data serialization errors
-            }
-        }
-
-        return builder.build();
+    /** Distinct top level subjects, sorted. */
+    public List<String> subjects() {
+        return catalog("subjects", "/api/v1/subjects", "subject");
     }
 
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> parseNdjsonResults(String ndjson) {
-        List<Map<String, Object>> results = new ArrayList<>();
-        if (ndjson == null || ndjson.trim().isEmpty()) {
-            return results;
-        }
-
-        String[] lines = ndjson.split("\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) continue;
-
-            try {
-                Map<String, Object> result = objectMapper.readValue(line, Map.class);
-                results.add(result);
-            } catch (JsonProcessingException e) {
-                System.err.println("Error parsing result: " + e.getMessage());
-                System.err.println("Problem with JSON: " + line);
-            }
-        }
-
-        return results;
+    /** Distinct event types, sorted. */
+    public List<String> types() {
+        return catalog("types", "/api/v1/types", "type");
     }
+
+    private List<String> catalog(String operation, String path, String field) {
+        List<String> out = new ArrayList<>();
+        for (JsonNode row : ndjson(operation, "GET", path, null, JsonNode.class)) {
+            out.add(row.path(field).asText());
+        }
+        return out;
+    }
+
+    // Schemas
+
+    /** Register a schema for an event type. Throws {@link ConflictException} when the type already has one. Administrator token. */
+    public void registerSchema(String eventType, Object schema) {
+        ObjectNode body = Json.MAPPER.createObjectNode();
+        body.put("type", eventType);
+        body.set("schema", Json.MAPPER.valueToTree(schema));
+        raw("register_schema", "POST", "/api/v1/schemas", body);
+    }
+
+    /** Every registered schema. */
+    public List<RegisteredSchema> schemas() {
+        return ndjson("schemas", "GET", "/api/v1/schemas", null, RegisteredSchema.class);
+    }
+
+    // Administration
 
     /**
-     * Handle for controlling event observation.
+     * Erase every reference payload below a subject. Inline event data is immutable and stays. Throws
+     * {@link NotFoundException} when the subject has no events, {@link UnprocessableException} when it has no
+     * reference payloads. Administrator token. Returns the server's confirmation text.
      */
-    public interface ObserveHandle {
-        /**
-         * Stops the event observation.
-         */
-        void stop();
+    public String erase(String subject) {
+        return text("erase", "POST", "/api/v1/erase", Json.MAPPER.createObjectNode().put("subject", subject));
+    }
 
-        /**
-         * Gets the future representing the observation task.
-         *
-         * @return the CompletableFuture for the observation
-         */
-        CompletableFuture<Void> getFuture();
+    // Transport
+
+    private static ObjectNode fetchBody(String subject, FetchOptions options) {
+        ObjectNode body = Json.MAPPER.createObjectNode().put("subject", subject);
+        if (options != null && !options.isEmpty()) {
+            body.set("options", Json.MAPPER.valueToTree(options));
+        }
+        return body;
+    }
+
+    private HttpRequest request(String method, String path, Object body, Duration timeout) {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(url + path))
+                .header("Authorization", "Bearer " + token)
+                .header("User-Agent", USER_AGENT);
+        if (timeout != null) {
+            b.timeout(timeout);
+        }
+        if (body == null) {
+            b.method(method, HttpRequest.BodyPublishers.noBody());
+        } else {
+            try {
+                b.header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(Json.MAPPER.writeValueAsString(body)));
+            } catch (IOException e) {
+                throw new IllegalArgumentException("body does not serialise to JSON", e);
+            }
+        }
+        return b.build();
+    }
+
+    private String raw(String operation, String method, String path, Object body) {
+        HttpResponse<String> response;
+        try {
+            response = http.send(request(method, path, body, timeout), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new GenesisDbException(operation, e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new GenesisDbException(operation, "interrupted", e);
+        }
+        if (response.statusCode() < 200 || response.statusCode() > 299) {
+            throw GenesisDbException.forResponse(operation, response.statusCode(), response.body());
+        }
+        return response.body();
+    }
+
+    private String text(String operation, String method, String path, Object body) {
+        return raw(operation, method, path, body);
+    }
+
+    private JsonNode json(String operation, String method, String path, Object body) {
+        try {
+            return Json.MAPPER.readTree(raw(operation, method, path, body));
+        } catch (IOException e) {
+            throw new GenesisDbException(operation, "invalid JSON in response", e);
+        }
+    }
+
+    private <T> List<T> ndjson(String operation, String method, String path, Object body, Class<T> type) {
+        String text = raw(operation, method, path, body);
+        List<T> out = new ArrayList<>();
+        for (String line : text.split("\n")) {
+            if (line.trim().isEmpty()) continue;
+            try {
+                out.add(Json.MAPPER.readValue(line, type));
+            } catch (IOException e) {
+                throw new GenesisDbException(operation, "invalid NDJSON line in response", e);
+            }
+        }
+        return out;
     }
 }

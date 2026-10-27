@@ -1,71 +1,59 @@
 package io.genesisdb.client;
 
 /**
- * Exception thrown when GenesisDB API operations fail.
+ * A non-2xx answer from GenesisDB, or a transport failure. Subclasses classify the status.
  */
 public class GenesisDbException extends RuntimeException {
-    private final int statusCode;
-    private final String statusText;
+    private final String operation;
+    private final int status;
+    private final String body;
 
-    /**
-     * Creates a new GenesisDbException.
-     *
-     * @param statusCode the HTTP status code
-     * @param statusText the HTTP status text
-     */
-    public GenesisDbException(int statusCode, String statusText) {
-        super("API Error: " + statusCode + " " + statusText);
-        this.statusCode = statusCode;
-        this.statusText = statusText;
+    public GenesisDbException(String operation, int status, String body) {
+        super(operation + ": " + status + " " + (body == null || body.trim().isEmpty() ? "no response body" : body.trim()));
+        this.operation = operation;
+        this.status = status;
+        this.body = body == null ? "" : body;
     }
 
-    /**
-     * Creates a new GenesisDbException with a message.
-     *
-     * @param message the error message
-     */
-    public GenesisDbException(String message) {
-        super(message);
-        this.statusCode = 0;
-        this.statusText = null;
+    public GenesisDbException(String operation, String message, Throwable cause) {
+        super(operation + ": " + message, cause);
+        this.operation = operation;
+        this.status = 0;
+        this.body = "";
     }
 
-    /**
-     * Creates a new GenesisDbException with a cause.
-     *
-     * @param message the error message
-     * @param cause the underlying cause
-     */
-    public GenesisDbException(String message, Throwable cause) {
-        super(message, cause);
-        this.statusCode = 0;
-        this.statusText = null;
+    /** The client operation that failed, for example "commit". */
+    public String getOperation() {
+        return operation;
     }
 
-    /**
-     * Gets the HTTP status code.
-     *
-     * @return the status code, or 0 if not applicable
-     */
-    public int getStatusCode() {
-        return statusCode;
+    /** The HTTP status, 0 for client-side failures. */
+    public int getStatus() {
+        return status;
     }
 
-    /**
-     * Gets the HTTP status text.
-     *
-     * @return the status text, or null if not applicable
-     */
-    public String getStatusText() {
-        return statusText;
+    /** The response body as text. */
+    public String getBody() {
+        return body;
     }
 
-    /**
-     * Checks if this exception represents a precondition failure (HTTP 412).
-     *
-     * @return true if this is a precondition failure
-     */
-    public boolean isPreconditionFailed() {
-        return statusCode == 412;
+    static GenesisDbException forResponse(String operation, int status, String body) {
+        switch (status) {
+            case 401:
+            case 403:
+                return new AuthenticationException(operation, status, body);
+            case 404:
+                return new NotFoundException(operation, body);
+            case 409:
+                return new ConflictException(operation, body);
+            case 412:
+                return new PreconditionFailedException(operation, body);
+            case 422:
+                return new UnprocessableException(operation, body);
+            case 503:
+                return new NotReadyException(operation, body);
+            default:
+                return new GenesisDbException(operation, status, body);
+        }
     }
 }

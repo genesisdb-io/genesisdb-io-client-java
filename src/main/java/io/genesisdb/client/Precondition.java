@@ -1,70 +1,42 @@
 package io.genesisdb.client;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.util.Collections;
 import java.util.Map;
 
-/**
- * Represents a precondition to be checked before committing events.
- */
-public class Precondition {
+/** A precondition that is checked atomically with the commit. Build one with the static factories. */
+public final class Precondition {
     private final String type;
-    private final Map<String, Object> payload;
+    private final Map<String, String> payload;
 
-    private Precondition(String type, Map<String, Object> payload) {
+    private Precondition(String type, String key, String value) {
         this.type = type;
-        this.payload = payload;
+        this.payload = Collections.singletonMap(key, value);
     }
 
+    /** Holds when neither the subject nor a descendant has events. */
+    public static Precondition isSubjectNew(String subject) {
+        return new Precondition("isSubjectNew", "subject", subject);
+    }
+
+    /** Holds when the subject or a descendant has events. */
+    public static Precondition isSubjectExisting(String subject) {
+        return new Precondition("isSubjectExisting", "subject", subject);
+    }
+
+    /** Holds when the GDBQL query result is true. */
+    public static Precondition isQueryResultTrue(String query) {
+        return new Precondition("isQueryResultTrue", "query", query);
+    }
+
+    @JsonProperty("type")
     public String getType() {
         return type;
     }
 
-    public Map<String, Object> getPayload() {
+    @JsonProperty("payload")
+    public Map<String, String> getPayload() {
         return payload;
-    }
-
-    /**
-     * Creates an isSubjectNew precondition.
-     * Ensures that a subject is new (has no existing events).
-     *
-     * @param subject the subject to check
-     * @return the precondition
-     */
-    public static Precondition isSubjectNew(String subject) {
-        return new Precondition("isSubjectNew", Map.of("subject", subject));
-    }
-
-    /**
-     * Creates an isSubjectExisting precondition.
-     * Ensures that events exist for the specified subject.
-     *
-     * @param subject the subject to check
-     * @return the precondition
-     */
-    public static Precondition isSubjectExisting(String subject) {
-        return new Precondition("isSubjectExisting", Map.of("subject", subject));
-    }
-
-    /**
-     * Creates an isQueryResultTrue precondition.
-     * Evaluates a GDBQL query and ensures the result is truthy.
-     *
-     * @param query the GDBQL query to evaluate
-     * @return the precondition
-     */
-    public static Precondition isQueryResultTrue(String query) {
-        return new Precondition("isQueryResultTrue", Map.of("query", query));
-    }
-
-    /**
-     * Creates a generic precondition with a custom type and payload.
-     * This is an escape-hatch for any precondition type that is not yet covered
-     * by the SDK (forward-compatible with future server releases).
-     *
-     * @param type the precondition type
-     * @param payload the precondition payload
-     * @return the precondition
-     */
-    public static Precondition of(String type, Map<String, Object> payload) {
-        return new Precondition(type, payload);
     }
 }

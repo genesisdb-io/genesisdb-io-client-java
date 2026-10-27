@@ -1,754 +1,188 @@
-# Java/Kotlin SDK
+# GenesisDB client for Java
 
-This is the official Java/Kotlin SDK for GenesisDB, an awesome and production ready event store database system for building event-driven apps.
+The official client for [GenesisDB](https://www.genesisdb.io), the open source event sourcing database. Java 11+, built on `java.net.http`, Jackson for JSON, works from Kotlin and Scala as well.
 
-## GenesisDB Advantages
-
-* Incredibly fast when reading, fast when writing
-* Easy backup creation and recovery
-* [CloudEvents](https://cloudevents.io/) compatible
-* GDPR-ready
-* Easily accessible via the HTTP interface
-* Auditable. Guarantee database consistency
-* Logging and metrics for Prometheus
-* SQL like query language called GenesisDB Query Language (GDBQL)
-* ...
-
-## Installation
-
-### Maven
+> **Version 2.0.0 targets GenesisDB 2.0 and is not compatible with GenesisDB 1.x servers or with the 1.x client API.** Routes, configuration, type names and method signatures have changed. Keep a 1.x client for a 1.x server.
+>
+> Existing 1.x clients keep working against a GenesisDB 2.0 server through deprecated route aliases, so the server can be upgraded first and the clients at your own pace. New 2.0 features (stored events returned by commit, upper bounds, schemas, typed errors) need this 2.0.0 client.
 
 ```xml
 <dependency>
     <groupId>io.genesisdb</groupId>
     <artifactId>genesisdb</artifactId>
-    <version>1.0.0</version>
+    <version>2.0.0</version>
 </dependency>
 ```
 
-### Gradle
-
-```groovy
-implementation 'io.genesisdb:genesisdb:1.0.0'
-```
-
-### Gradle (Kotlin DSL)
-
 ```kotlin
-implementation("io.genesisdb:genesisdb:1.0.0")
+implementation("io.genesisdb:genesisdb:2.0.0")
 ```
 
-## Configuration
+## Quick start
 
-### Environment Variables
-The following environment variables are required:
-```
-GENESISDB_AUTH_TOKEN=<secret>
-GENESISDB_API_URL=http://localhost:8080
-GENESISDB_API_VERSION=v1
-```
-
-### Basic Setup
-
-**Java:**
 ```java
-import io.genesisdb.client.Client;
+import io.genesisdb.client.*;
 
-// Initialize the GenesisDB client (using environment variables)
-Client client = new Client();
-```
+Client db = Client.builder().url("http://localhost:8080").token(System.getenv("GENESISDB_AUTH_TOKEN")).build();
 
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.Client
-
-// Initialize the GenesisDB client (using environment variables)
-val client = Client()
-```
-
-### Explicit Configuration
-
-**Java:**
-```java
-import io.genesisdb.client.Client;
-import io.genesisdb.client.ClientConfig;
-
-Client client = new Client(ClientConfig.builder()
-    .apiUrl("http://localhost:8080")
-    .apiVersion("v1")
-    .authToken("your-token")
-    .build());
-```
-
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.Client
-import io.genesisdb.client.ClientConfig
-
-val client = Client(ClientConfig.builder()
-    .apiUrl("http://localhost:8080")
-    .apiVersion("v1")
-    .authToken("your-token")
-    .build())
-```
-
-## Streaming Events
-
-### Basic Event Streaming
-
-**Java:**
-```java
-// Stream all events for a subject
-List<CloudEvent> events = client.streamEvents("/customer");
-```
-
-**Kotlin:**
-```kotlin
-// Stream all events for a subject
-val events = client.streamEvents("/customer")
-```
-
-### Stream Events from Lower Bound
-
-**Java:**
-```java
-List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .build());
-```
-
-**Kotlin:**
-```kotlin
-val events = client.streamEvents("/", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .build())
-```
-
-### Stream Events with Upper Bound
-
-**Java:**
-```java
-List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build());
-```
-
-**Kotlin:**
-```kotlin
-val events = client.streamEvents("/", StreamOptions.builder()
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build())
-```
-
-### Stream Events with Both Lower and Upper Bounds
-
-**Java:**
-```java
-List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build());
-```
-
-**Kotlin:**
-```kotlin
-val events = client.streamEvents("/", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build())
-```
-
-### Stream Latest Events by Event Type
-
-**Java:**
-```java
-List<CloudEvent> events = client.streamEvents("/", StreamOptions.builder()
-    .latestByEventType("io.genesisdb.app.customer-updated")
-    .build());
-```
-
-**Kotlin:**
-```kotlin
-val events = client.streamEvents("/", StreamOptions.builder()
-    .latestByEventType("io.genesisdb.app.customer-updated")
-    .build())
-```
-
-This feature allows you to stream only the latest event of a specific type for each subject. Useful for getting the current state of entities.
-
-## Committing Events
-
-### Basic Event Committing
-
-**Java:**
-```java
-import io.genesisdb.client.EventData;
-import java.util.List;
-import java.util.Map;
-
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer")
-        .type("io.genesisdb.app.customer-added")
-        .data(Map.of(
-            "firstName", "Bruce",
-            "lastName", "Wayne",
-            "emailAddress", "bruce.wayne@enterprise.wayne"
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer")
-        .type("io.genesisdb.app.customer-added")
-        .data(Map.of(
-            "firstName", "Alfred",
-            "lastName", "Pennyworth",
-            "emailAddress", "alfred.pennyworth@enterprise.wayne"
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.store")
-        .subject("/article")
-        .type("io.genesisdb.store.article-added")
-        .data(Map.of(
-            "name", "Tumbler",
-            "color", "black",
-            "price", 2990000.00
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer/fed2902d-0135-460d-8605-263a06308448")
-        .type("io.genesisdb.app.customer-personaldata-changed")
-        .data(Map.of(
-            "firstName", "Angus",
-            "lastName", "MacGyver",
-            "emailAddress", "angus.macgyer@phoenix.foundation"
-        ))
-        .build()
+db.commit(List.of(
+    new NewEvent("io.example.shop", "/customer/42", "io.example.shop.customer-registered", Map.of("name", "Bruce Wayne"))
 ));
+
+List<Event> events = db.fetch("/customer/42");
 ```
 
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.EventData
+`url` and `token` fall back to `GENESISDB_URL` and `GENESISDB_AUTH_TOKEN`, so `Client.fromEnv()` works in an environment that sets both. The client is thread-safe and shares one connection pool.
 
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer")
-        .type("io.genesisdb.app.customer-added")
-        .data(mapOf(
-            "firstName" to "Bruce",
-            "lastName" to "Wayne",
-            "emailAddress" to "bruce.wayne@enterprise.wayne"
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer")
-        .type("io.genesisdb.app.customer-added")
-        .data(mapOf(
-            "firstName" to "Alfred",
-            "lastName" to "Pennyworth",
-            "emailAddress" to "alfred.pennyworth@enterprise.wayne"
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.store")
-        .subject("/article")
-        .type("io.genesisdb.store.article-added")
-        .data(mapOf(
-            "name" to "Tumbler",
-            "color" to "black",
-            "price" to 2990000.00
-        ))
-        .build(),
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/customer/fed2902d-0135-460d-8605-263a06308448")
-        .type("io.genesisdb.app.customer-personaldata-changed")
-        .data(mapOf(
-            "firstName" to "Angus",
-            "lastName" to "MacGyver",
-            "emailAddress" to "angus.macgyer@phoenix.foundation"
-        ))
-        .build()
-))
+## Events
+
+```java
+// Commit a batch atomically. The server assigns ID, time and hashes and returns the stored events.
+List<Event> stored = db.commit(List.of(
+    new NewEvent("io.example.shop", "/order/1", "io.example.shop.order-placed", Map.of("total", 99.5)),
+    new NewEvent("io.example.shop", "/order/1/item/1", "io.example.shop.item-added", Map.of("sku", "A1", "qty", 2))
+));
+stored.get(0).getId();    // "3f2c..."
+stored.get(0).getHash();  // "a9b1..."
+stored.get(0).getTime();  // OffsetDateTime
+
+// A subject with one segment gets a generated ID appended.
+db.commit(List.of(new NewEvent("io.example.shop", "/customer", "io.example.shop.customer-registered", Map.of("name", "Selina"))));
+
+// Fetch a subject with all descendants, in commit order.
+List<Event> all = db.fetch("/order/1");
+
+// Resume after a known event, or stop at one.
+List<Event> since = db.fetch("/order", new FetchOptions().lowerBound(lastSeenId, false));
+List<Event> until = db.fetch("/order", new FetchOptions().upperBound(someId, true));
+
+// Only the newest event of a type below the subject.
+List<Event> latest = db.fetch("/order/1", new FetchOptions().latestByEventType("io.example.shop.order-placed"));
+
+// Typed payloads
+record Order(double total) {}
+Order order = stored.get(0).getDataAs(Order.class);
 ```
+
+`data` accepts a `Map`, a Jackson `JsonNode` or any bean that serialises to a JSON object. `Event.getData()` returns a `JsonNode`.
 
 ## Preconditions
 
-Preconditions allow you to enforce certain checks on the server before committing events. GenesisDB supports multiple precondition types:
+Preconditions are checked atomically with the commit. A failed precondition throws `PreconditionFailedException` and writes nothing.
 
-### isSubjectNew
-Ensures that a subject is new (has no existing events):
-
-**Java:**
 ```java
-import io.genesisdb.client.Precondition;
-
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(Map.of(
-            "firstName", "John",
-            "lastName", "Doe",
-            "email", "john.doe@example.com"
-        ))
-        .build()
-), List.of(
-    Precondition.isSubjectNew("/user/456")
-));
-```
-
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.Precondition
-
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(mapOf(
-            "firstName" to "John",
-            "lastName" to "Doe",
-            "email" to "john.doe@example.com"
-        ))
-        .build()
-), listOf(
-    Precondition.isSubjectNew("/user/456")
-))
-```
-
-### isSubjectExisting
-Ensures that events exist for the specified subject:
-
-**Java:**
-```java
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(Map.of(
-            "firstName", "John",
-            "lastName", "Doe",
-            "email", "john.doe@example.com"
-        ))
-        .build()
-), List.of(
-    Precondition.isSubjectExisting("/user/456")
-));
-```
-
-**Kotlin:**
-```kotlin
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(mapOf(
-            "firstName" to "John",
-            "lastName" to "Doe",
-            "email" to "john.doe@example.com"
-        ))
-        .build()
-), listOf(
-    Precondition.isSubjectExisting("/user/456")
-))
-```
-
-### isQueryResultTrue
-Evaluates a query and ensures the result is truthy. Supports the full GDBQL feature set including complex WHERE clauses, aggregations, and calculated fields.
-
-**Basic uniqueness check (Java):**
-```java
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(Map.of(
-            "firstName", "John",
-            "lastName", "Doe",
-            "email", "john.doe@example.com"
-        ))
-        .build()
-), List.of(
-    Precondition.isQueryResultTrue(
-        "STREAM e FROM events WHERE e.data.email == 'john.doe@example.com' MAP COUNT() == 0"
-    )
-));
-```
-
-**Business rule enforcement (transaction limits) (Java):**
-```java
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.banking")
-        .subject("/user/123/transactions")
-        .type("io.genesisdb.banking.transaction-processed")
-        .data(Map.of(
-            "amount", 500.00,
-            "currency", "EUR"
-        ))
-        .build()
-), List.of(
-    Precondition.isQueryResultTrue(
-        "STREAM e FROM events WHERE e.subject UNDER '/user/123' AND e.type == 'transaction-processed' AND e.time >= '2024-01-01T00:00:00Z' MAP SUM(e.data.amount) + 500 <= 10000"
-    )
-));
-```
-
-**Complex validation with aggregations (Kotlin):**
-```kotlin
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.events")
-        .subject("/conference/2024/registrations")
-        .type("io.genesisdb.events.registration-created")
-        .data(mapOf(
-            "attendeeId" to "att-789",
-            "ticketType" to "premium"
-        ))
-        .build()
-), listOf(
-    Precondition.isQueryResultTrue(
-        "STREAM e FROM events WHERE e.subject UNDER '/conference/2024/registrations' AND e.type == 'registration-created' GROUP BY e.data.ticketType HAVING e.data.ticketType == 'premium' MAP COUNT() < 50"
-    )
-))
-```
-
-**Supported GDBQL Features in Preconditions:**
-- WHERE conditions with AND/OR/IN/BETWEEN operators
-- Hierarchical subject queries (UNDER, DESCENDANTS)
-- Aggregation functions (COUNT, SUM, AVG, MIN, MAX)
-- GROUP BY with HAVING clauses
-- ORDER BY and LIMIT clauses
-- Calculated fields and expressions
-- Nested field access (e.data.address.city)
-- String concatenation and arithmetic operations
-
-If a precondition fails, the commit throws a `GenesisDbException` with HTTP 412 (Precondition Failed). You can check this with `exception.isPreconditionFailed()`.
-
-### Generic Precondition (Forward Compatibility)
-
-For precondition types not yet covered by the SDK (forward-compatible with future server releases), use `Precondition.of()`:
-
-**Java:**
-```java
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/test")
-        .type("io.genesisdb.app.test-created")
-        .data(Map.of("key", "value"))
-        .build()
-), List.of(
-    Precondition.of("customPreconditionType", Map.of("param", "value"))
-));
-```
-
-**Kotlin:**
-```kotlin
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/test")
-        .type("io.genesisdb.app.test-created")
-        .data(mapOf("key" to "value"))
-        .build()
-), listOf(
-    Precondition.of("customPreconditionType", mapOf("param" to "value"))
-))
-```
-
-## GDPR Compliance
-
-### Store Data as Reference
-
-**Java:**
-```java
-import io.genesisdb.client.EventOptions;
-
-client.commitEvents(List.of(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(Map.of(
-            "firstName", "John",
-            "lastName", "Doe",
-            "email", "john.doe@example.com"
-        ))
-        .options(EventOptions.builder()
-            .storeDataAsReference(true)
-            .build())
-        .build()
-));
-```
-
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.EventOptions
-
-client.commitEvents(listOf(
-    EventData.builder()
-        .source("io.genesisdb.app")
-        .subject("/user/456")
-        .type("io.genesisdb.app.user-created")
-        .data(mapOf(
-            "firstName" to "John",
-            "lastName" to "Doe",
-            "email" to "john.doe@example.com"
-        ))
-        .options(EventOptions.builder()
-            .storeDataAsReference(true)
-            .build())
-        .build()
-))
-```
-
-### Delete Referenced Data
-
-**Java:**
-```java
-client.eraseData("/user/456");
-```
-
-**Kotlin:**
-```kotlin
-client.eraseData("/user/456")
-```
-
-## Observing Events
-
-### Basic Event Observation
-
-**Java:**
-```java
-import io.genesisdb.client.EventObserver;
-
-Client.ObserveHandle handle = client.observeEvents("/customer", event -> {
-    System.out.println("Received event: " + event);
-});
-
-// Later, to stop observing:
-handle.stop();
-```
-
-**Kotlin:**
-```kotlin
-val handle = client.observeEvents("/customer") { event ->
-    println("Received event: $event")
-}
-
-// Later, to stop observing:
-handle.stop()
-```
-
-### Observe Events from Lower Bound (Message Queue)
-
-**Java:**
-```java
-client.observeEvents("/customer", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .build(),
-    event -> System.out.println("Received event: " + event)
-);
-```
-
-**Kotlin:**
-```kotlin
-client.observeEvents("/customer", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .build()
-) { event ->
-    println("Received event: $event")
-}
-```
-
-### Observe Events with Upper Bound (Message Queue)
-
-**Java:**
-```java
-client.observeEvents("/customer", StreamOptions.builder()
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build(),
-    event -> System.out.println("Received event: " + event)
-);
-```
-
-**Kotlin:**
-```kotlin
-client.observeEvents("/customer", StreamOptions.builder()
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build()
-) { event ->
-    println("Received event: $event")
-}
-```
-
-### Observe Events with Both Bounds (Message Queue)
-
-**Java:**
-```java
-client.observeEvents("/customer", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build(),
-    event -> System.out.println("Received event: " + event)
-);
-```
-
-**Kotlin:**
-```kotlin
-client.observeEvents("/customer", StreamOptions.builder()
-    .lowerBound("2d6d4141-6107-4fb2-905f-445730f4f2a9")
-    .includeLowerBoundEvent(true)
-    .upperBound("9f3e4141-7208-4fb2-905f-445730f4f3b1")
-    .includeUpperBoundEvent(false)
-    .build()
-) { event ->
-    println("Received event: $event")
-}
-```
-
-### Observe Latest Events by Event Type (Message Queue)
-
-**Java:**
-```java
-client.observeEvents("/customer", StreamOptions.builder()
-    .latestByEventType("io.genesisdb.app.customer-updated")
-    .build(),
-    event -> System.out.println("Received latest event: " + event)
-);
-```
-
-**Kotlin:**
-```kotlin
-client.observeEvents("/customer", StreamOptions.builder()
-    .latestByEventType("io.genesisdb.app.customer-updated")
-    .build()
-) { event ->
-    println("Received latest event: $event")
-}
-```
-
-## Querying Events
-
-**Java:**
-```java
-List<Map<String, Object>> results = client.queryEvents(
-    "STREAM e FROM events WHERE e.type == \"io.genesisdb.app.customer-added\" ORDER BY e.time DESC LIMIT 20 MAP { subject: e.subject, firstName: e.data.firstName }"
-);
-System.out.println("Query results: " + results);
-```
-
-**Kotlin:**
-```kotlin
-val results = client.queryEvents(
-    """STREAM e FROM events WHERE e.type == "io.genesisdb.app.customer-added" ORDER BY e.time DESC LIMIT 20 MAP { subject: e.subject, firstName: e.data.firstName }"""
-)
-println("Query results: $results")
-```
-
-## Health Checks
-
-**Java:**
-```java
-// Check API status
-String pingResponse = client.ping();
-System.out.println("Ping response: " + pingResponse);
-
-// Run audit to check event consistency
-String auditResponse = client.audit();
-System.out.println("Audit response: " + auditResponse);
-```
-
-**Kotlin:**
-```kotlin
-// Check API status
-val pingResponse = client.ping()
-println("Ping response: $pingResponse")
-
-// Run audit to check event consistency
-val auditResponse = client.audit()
-println("Audit response: $auditResponse")
-```
-
-## Error Handling
-
-**Java:**
-```java
-import io.genesisdb.client.GenesisDbException;
-
 try {
-    client.commitEvents(events, preconditions);
-} catch (GenesisDbException e) {
-    if (e.isPreconditionFailed()) {
-        System.out.println("Precondition failed: " + e.getMessage());
-    } else {
-        System.out.println("API error: " + e.getStatusCode() + " " + e.getStatusText());
-    }
+    db.commit(
+        List.of(new NewEvent("io.example.shop", "/customer/42", "io.example.shop.customer-registered", Map.of("email", "bruce@example.com"))),
+        List.of(
+            Precondition.isSubjectNew("/customer/42"),
+            Precondition.isQueryResultTrue("STREAM e FROM events WHERE e.data.email == 'bruce@example.com' MAP COUNT() == 0")
+        )
+    );
+} catch (PreconditionFailedException e) {
+    System.out.println(e.getPreconditionType() + ": " + e.getReason()); // "isSubjectNew: subject /customer/42 already has events"
 }
 ```
 
-**Kotlin:**
-```kotlin
-import io.genesisdb.client.GenesisDbException
+Factories: `isSubjectNew`, `isSubjectExisting`, `isQueryResultTrue`.
 
-try {
-    client.commitEvents(events, preconditions)
-} catch (e: GenesisDbException) {
-    if (e.isPreconditionFailed) {
-        println("Precondition failed: ${e.message}")
-    } else {
-        println("API error: ${e.statusCode} ${e.statusText}")
-    }
-}
-```
+## Subscriptions
 
-## Resource Cleanup
+`subscribe` consumes Server-Sent Events. It delivers the existing history first, then new events as they are committed, and blocks until the server ends the stream or the thread is interrupted. Run it on its own thread.
 
-**Java:**
 ```java
-// When done with the client
-client.close();
+Thread consumer = new Thread(() ->
+    db.subscribe("/order", new SubscribeOptions().interval(Duration.ofMillis(500)), event -> {
+        System.out.println(event.getType() + " " + event.getData());
+    })
+);
+consumer.start();
+// ...
+consumer.interrupt(); // stops the subscription
 ```
 
-**Kotlin:**
-```kotlin
-// When done with the client
-client.close()
+`interval` is the poll interval (default 1 s). The bound options of `fetch` work here as well through `SubscribeOptions.fetch(...)`, so a consumer that persists the last processed event ID resumes with `lowerBound`. A stream the server ends with an error throws `GenesisDbException`.
+
+## Queries
+
+[GDBQL](https://github.com/genesisdb-io/genesisdb/blob/main/docs/gdbql.md) runs on the server. Results come back as rows, a bare aggregate as a single-element list.
+
+```java
+List<JsonNode> rows = db.query("STREAM e FROM events WHERE e.subject UNDER '/customer' MAP { name: e.data.name, total: e.data.total }");
+
+record Row(String name, double total) {}
+List<Row> typed = db.query("STREAM e FROM events WHERE e.subject UNDER '/customer' MAP { name: e.data.name, total: e.data.total }", Row.class);
+
+List<Integer> count = db.query("STREAM e FROM events WHERE e.type == 'io.example.shop.order-placed' MAP COUNT()", Integer.class);
+
+List<JsonNode> byCategory = db.query(
+    "STREAM e FROM events WHERE e.type == 'io.example.shop.item-added' GROUP BY e.data.category MAP { category: e.data.category, items: COUNT(), revenue: SUM(e.data.total) }"
+);
+```
+
+## GDPR: reference payloads and erasure
+
+Store a payload as reference data and it can be erased later. The event, its hash and the chain stay intact, the payload becomes `{}`.
+
+```java
+db.commit(List.of(
+    new NewEvent("io.example.shop", "/customer/42", "io.example.shop.customer-registered", Map.of("name", "Bruce", "email", "bruce@example.com")).asReference()
+));
+
+db.erase("/customer/42"); // administrator token
+```
+
+Inline payloads are immutable. `erase` on a subject without reference payloads throws `UnprocessableException` (422).
+
+## Schemas
+
+```java
+db.registerSchema("io.example.shop.order-placed", Map.of(
+    "type", "object",
+    "properties", Map.of("total", Map.of("type", "number"), "currency", Map.of("type", "string")),
+    "required", List.of("total")
+));
+
+List<RegisteredSchema> schemas = db.schemas();
+```
+
+Commits of that type are validated. A violation throws `GenesisDbException` with status 400.
+
+## Catalog, status, administration
+
+```java
+db.subjects();          // ["/customer", "/order"]
+db.types();             // ["io.example.shop.customer-registered", ...]
+db.status();            // version, event counts, storage format, readiness, raw document
+db.ping();              // "Pong", no token required
+
+db.audit();             // "Audit passed. All 1234 events integrity checks succeeded."
+```
+
+Audit, erase and schema registration need the administrator token. Everything else works with a reader token (`GENESISDB_READ_TOKEN`), commit additionally with a writer token.
+
+## Errors
+
+Every non-2xx answer throws `GenesisDbException` (unchecked) with `getStatus()`, `getBody()` and `getOperation()`. Subclasses: `PreconditionFailedException` (412, with `getPreconditionType()` and `getReason()`), `AuthenticationException` (401, 403), `NotFoundException` (404), `ConflictException` (409), `UnprocessableException` (422), `NotReadyException` (503). Transport failures throw `GenesisDbException` with status 0 and the cause attached.
+
+## Configuration
+
+```java
+Client.builder()
+    .url("http://localhost:8080")       // or GENESISDB_URL
+    .token("...")                       // or GENESISDB_AUTH_TOKEN
+    .timeout(Duration.ofSeconds(30))    // for non-streaming calls, null disables
+    .http(HttpClient.newHttpClient())   // optional, bring your own HttpClient (proxies, TLS, executor)
+    .build();
+```
+
+## Development
+
+```bash
+mvn test                                                                        # unit tests against WireMock
+GENESISDB_URL=http://localhost:8080 GENESISDB_AUTH_TOKEN=... mvn test           # also runs ClientIntegrationTest against a running GenesisDB
 ```
 
 ## License
 
 MIT
-
-## Author
-
-* E-Mail: mail@genesisdb.io
-* URL: https://www.genesisdb.io
-* Docs: https://docs.genesisdb.io

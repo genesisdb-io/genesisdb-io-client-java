@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: ["11", "21"]
+    services:
+      genesisdb:
+        image: genesisdb/genesisdb:latest
+        env:
+          GENESISDB_AUTH_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        ports:
+          - 8080:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - run: mvn -B verify
+        env:
+          GENESISDB_URL: http://localhost:8080
+          GENESISDB_AUTH_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
