@@ -2,7 +2,7 @@ package io.genesisdb.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-/** The body of GET /api/v1/status. */
+/** The body of GET /api/v2/status. */
 public final class Status {
     private final JsonNode raw;
 

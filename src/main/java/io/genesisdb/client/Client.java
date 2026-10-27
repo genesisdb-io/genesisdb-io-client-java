@@ -108,17 +108,17 @@ public final class Client {
 
     /** Liveness check. Needs no token on the server. Returns "Pong". */
     public String ping() {
-        return text("ping", "GET", "/ping", null);
+        return text("ping", "GET", "/api/v2/ping", null);
     }
 
     /** Engine version, host, event counts, storage format and readiness. */
     public Status status() {
-        return new Status(json("status", "GET", "/api/v1/status", null));
+        return new Status(json("status", "GET", "/api/v2/status", null));
     }
 
     /** Verify the hash chain of the whole store. Administrator token. Returns the audit text. */
     public String audit() {
-        return text("audit", "GET", "/api/v1/status/audit", null);
+        return text("audit", "GET", "/api/v2/admin/audit", null);
     }
 
     // Events
@@ -141,7 +141,7 @@ public final class Client {
         if (preconditions != null && !preconditions.isEmpty()) {
             body.set("preconditions", Json.MAPPER.valueToTree(preconditions));
         }
-        return ndjson("commit", "POST", "/api/v1/commit", body, Event.class);
+        return ndjson("commit", "POST", "/api/v2/commit", body, Event.class);
     }
 
     /** Fetch the events of a subject and all of its descendants, in commit order. */
@@ -150,7 +150,7 @@ public final class Client {
     }
 
     public List<Event> fetch(String subject, FetchOptions options) {
-        return ndjson("fetch", "POST", "/api/v1/fetch", fetchBody(subject, options), Event.class);
+        return ndjson("fetch", "POST", "/api/v2/fetch", fetchBody(subject, options), Event.class);
     }
 
     /**
@@ -164,7 +164,7 @@ public final class Client {
         if (resolved.getInterval() != null) {
             body.put("interval", resolved.getInterval().toNanos() / 1_000_000_000.0);
         }
-        HttpRequest request = request("POST", "/api/v1/subscribe", body, null);
+        HttpRequest request = request("POST", "/api/v2/subscribe", body, null);
         HttpResponse<InputStream> response;
         try {
             response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -220,22 +220,22 @@ public final class Client {
 
     /** Run a GDBQL query. Returns the result rows, or a single-element list for a bare aggregate. */
     public List<JsonNode> query(String query) {
-        return ndjson("query", "POST", "/api/v1/query", Json.MAPPER.createObjectNode().put("query", query), JsonNode.class);
+        return ndjson("query", "POST", "/api/v2/query", Json.MAPPER.createObjectNode().put("query", query), JsonNode.class);
     }
 
     /** Run a GDBQL query and decode every row into the given type. */
     public <T> List<T> query(String query, Class<T> rowType) {
-        return ndjson("query", "POST", "/api/v1/query", Json.MAPPER.createObjectNode().put("query", query), rowType);
+        return ndjson("query", "POST", "/api/v2/query", Json.MAPPER.createObjectNode().put("query", query), rowType);
     }
 
     /** Distinct top level subjects, sorted. */
     public List<String> subjects() {
-        return catalog("subjects", "/api/v1/subjects", "subject");
+        return catalog("subjects", "/api/v2/subjects", "subject");
     }
 
     /** Distinct event types, sorted. */
     public List<String> types() {
-        return catalog("types", "/api/v1/types", "type");
+        return catalog("types", "/api/v2/types", "type");
     }
 
     private List<String> catalog(String operation, String path, String field) {
@@ -253,12 +253,12 @@ public final class Client {
         ObjectNode body = Json.MAPPER.createObjectNode();
         body.put("type", eventType);
         body.set("schema", Json.MAPPER.valueToTree(schema));
-        raw("register_schema", "POST", "/api/v1/schemas", body);
+        raw("register_schema", "POST", "/api/v2/schemas", body);
     }
 
     /** Every registered schema. */
     public List<RegisteredSchema> schemas() {
-        return ndjson("schemas", "GET", "/api/v1/schemas", null, RegisteredSchema.class);
+        return ndjson("schemas", "GET", "/api/v2/schemas", null, RegisteredSchema.class);
     }
 
     // Administration
@@ -269,7 +269,7 @@ public final class Client {
      * reference payloads. Administrator token. Returns the server's confirmation text.
      */
     public String erase(String subject) {
-        return text("erase", "POST", "/api/v1/erase", Json.MAPPER.createObjectNode().put("subject", subject));
+        return text("erase", "POST", "/api/v2/admin/erase", Json.MAPPER.createObjectNode().put("subject", subject));
     }
 
     // Transport

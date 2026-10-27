@@ -61,18 +61,18 @@ class ClientTest {
 
     @Test
     void pingSendsHeaders() {
-        server.stubFor(get("/ping").willReturn(ok("Pong")));
+        server.stubFor(get("/api/v2/ping").willReturn(ok("Pong")));
         assertEquals("Pong", db.ping());
-        server.verify(getRequestedFor(urlEqualTo("/ping"))
+        server.verify(getRequestedFor(urlEqualTo("/api/v2/ping"))
                 .withHeader("Authorization", equalTo("Bearer secret"))
                 .withHeader("User-Agent", equalTo("genesisdb-java/2")));
     }
 
     @Test
     void commitSendsBodyAndParsesNdjson() {
-        server.stubFor(post("/api/v1/commit").willReturn(ok(STORED + "\n")));
+        server.stubFor(post("/api/v2/commit").willReturn(ok(STORED + "\n")));
         List<Event> events = db.commit(List.of(event("/customer/1")), List.of(Precondition.isSubjectNew("/customer/1")));
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/commit")).withRequestBody(equalToJson(
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/commit")).withRequestBody(equalToJson(
                 "{\"events\":[{\"source\":\"app\",\"subject\":\"/customer/1\",\"type\":\"customer.created\",\"data\":{\"name\":\"Bruce\"}}],"
                         + "\"preconditions\":[{\"type\":\"isSubjectNew\",\"payload\":{\"subject\":\"/customer/1\"}}]}")));
         assertEquals(1, events.size());
@@ -87,9 +87,9 @@ class ClientTest {
 
     @Test
     void commitOmitsEmptyPreconditionsAndSerialisesReferenceOption() {
-        server.stubFor(post("/api/v1/commit").willReturn(ok(STORED + "\n")));
+        server.stubFor(post("/api/v2/commit").willReturn(ok(STORED + "\n")));
         db.commit(List.of(event("/customer/1").asReference()));
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/commit")).withRequestBody(equalToJson(
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/commit")).withRequestBody(equalToJson(
                 "{\"events\":[{\"source\":\"app\",\"subject\":\"/customer/1\",\"type\":\"customer.created\",\"data\":{\"name\":\"Bruce\"},\"options\":{\"storeDataAsReference\":true}}]}")));
     }
 
@@ -100,7 +100,7 @@ class ClientTest {
 
     @Test
     void preconditionFailedIsParsed() {
-        server.stubFor(post("/api/v1/commit").willReturn(status(412).withBody("{\"type\":\"isSubjectNew\",\"message\":\"subject /customer/1 already exists\"}")));
+        server.stubFor(post("/api/v2/commit").willReturn(status(412).withBody("{\"type\":\"isSubjectNew\",\"message\":\"subject /customer/1 already exists\"}")));
         PreconditionFailedException e = assertThrows(PreconditionFailedException.class, () -> db.commit(List.of(event("/customer/1"))));
         assertEquals(412, e.getStatus());
         assertEquals("isSubjectNew", e.getPreconditionType());
@@ -110,15 +110,15 @@ class ClientTest {
 
     @Test
     void fetchWithAndWithoutOptions() {
-        server.stubFor(post("/api/v1/fetch").willReturn(ok(STORED + "\n" + STORED + "\n")));
+        server.stubFor(post("/api/v2/fetch").willReturn(ok(STORED + "\n" + STORED + "\n")));
         assertEquals(2, db.fetch("/customer", new FetchOptions().lowerBound("x", true)).size());
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/fetch")).withRequestBody(equalToJson(
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/fetch")).withRequestBody(equalToJson(
                 "{\"subject\":\"/customer\",\"options\":{\"lowerBound\":\"x\",\"includeLowerBoundEvent\":true}}")));
         server.resetRequests();
-        server.stubFor(post("/api/v1/fetch").willReturn(ok("")));
+        server.stubFor(post("/api/v2/fetch").willReturn(ok("")));
         assertTrue(db.fetch("/customer").isEmpty());
         assertTrue(db.fetch("/customer", new FetchOptions()).isEmpty());
-        server.verify(2, postRequestedFor(urlEqualTo("/api/v1/fetch")).withRequestBody(equalToJson("{\"subject\":\"/customer\"}")));
+        server.verify(2, postRequestedFor(urlEqualTo("/api/v2/fetch")).withRequestBody(equalToJson("{\"subject\":\"/customer\"}")));
     }
 
     public static final class Row {
@@ -127,9 +127,9 @@ class ClientTest {
 
     @Test
     void querySubjectsTypes() {
-        server.stubFor(post("/api/v1/query").willReturn(ok("{\"name\":\"Bruce\"}\n{\"name\":\"Selina\"}\n")));
-        server.stubFor(get("/api/v1/subjects").willReturn(ok("{\"subject\":\"/customer\"}\n{\"subject\":\"/order\"}\n")));
-        server.stubFor(get("/api/v1/types").willReturn(ok("{\"type\":\"customer.created\"}\n")));
+        server.stubFor(post("/api/v2/query").willReturn(ok("{\"name\":\"Bruce\"}\n{\"name\":\"Selina\"}\n")));
+        server.stubFor(get("/api/v2/subjects").willReturn(ok("{\"subject\":\"/customer\"}\n{\"subject\":\"/order\"}\n")));
+        server.stubFor(get("/api/v2/types").willReturn(ok("{\"type\":\"customer.created\"}\n")));
         List<JsonNode> rows = db.query("STREAM e FROM events MAP { name: e.data.name }");
         assertEquals("Bruce", rows.get(0).get("name").asText());
         List<Row> typed = db.query("x", Row.class);
@@ -140,7 +140,7 @@ class ClientTest {
 
     @Test
     void statusIsMapped() {
-        server.stubFor(get("/api/v1/status").willReturn(okJson(
+        server.stubFor(get("/api/v2/status").willReturn(okJson(
                 "{\"engine\":{\"version\":\"2.0.0\",\"channel\":\"stable\"},\"host\":{\"hostname\":\"db\"},"
                         + "\"events\":{\"count\":3,\"subjects\":1,\"types\":2},\"storage\":{\"storageFormat\":\"v2\",\"ready\":true}}")));
         Status s = db.status();
@@ -152,19 +152,19 @@ class ClientTest {
 
     @Test
     void schemasAndAdmin() {
-        server.stubFor(post("/api/v1/schemas").willReturn(status(201)));
-        server.stubFor(get("/api/v1/schemas").willReturn(ok("{\"type\":\"customer.created\",\"schema\":{\"type\":\"object\"}}\n")));
-        server.stubFor(get("/api/v1/status/audit").willReturn(ok("Audit passed")));
-        server.stubFor(post("/api/v1/erase").willReturn(ok("Erased")));
+        server.stubFor(post("/api/v2/schemas").willReturn(status(201)));
+        server.stubFor(get("/api/v2/schemas").willReturn(ok("{\"type\":\"customer.created\",\"schema\":{\"type\":\"object\"}}\n")));
+        server.stubFor(get("/api/v2/admin/audit").willReturn(ok("Audit passed")));
+        server.stubFor(post("/api/v2/admin/erase").willReturn(ok("Erased")));
 
         db.registerSchema("customer.created", Map.of("type", "object"));
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/schemas")).withRequestBody(equalToJson("{\"type\":\"customer.created\",\"schema\":{\"type\":\"object\"}}")));
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/schemas")).withRequestBody(equalToJson("{\"type\":\"customer.created\",\"schema\":{\"type\":\"object\"}}")));
         List<RegisteredSchema> schemas = db.schemas();
         assertEquals("customer.created", schemas.get(0).getType());
         assertEquals("object", schemas.get(0).getSchema().get("type").asText());
         assertEquals("Audit passed", db.audit());
         assertEquals("Erased", db.erase("/customer/1"));
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/erase")).withRequestBody(equalToJson("{\"subject\":\"/customer/1\"}")));
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/admin/erase")).withRequestBody(equalToJson("{\"subject\":\"/customer/1\"}")));
     }
 
     @ParameterizedTest
@@ -178,7 +178,7 @@ class ClientTest {
             "500, io.genesisdb.client.GenesisDbException",
     })
     void errorClasses(int status, String className) throws Exception {
-        server.stubFor(post("/api/v1/fetch").willReturn(status(status).withBody("nope")));
+        server.stubFor(post("/api/v2/fetch").willReturn(status(status).withBody("nope")));
         GenesisDbException e = assertThrows(GenesisDbException.class, () -> db.fetch("/x"));
         assertEquals(Class.forName(className), e.getClass());
         assertEquals(status, e.getStatus());
@@ -190,18 +190,18 @@ class ClientTest {
     @Test
     void subscribeSkipsHeartbeatAndStopsOnError() {
         String stream = "data: " + STORED + "\n\ndata: {\"payload\":\"\"}\n\ndata: " + STORED + "\n\nevent: error\ndata: {\"error\":\"store closed\"}\n\n";
-        server.stubFor(post("/api/v1/subscribe").willReturn(ok(stream).withHeader("Content-Type", "text/event-stream")));
+        server.stubFor(post("/api/v2/subscribe").willReturn(ok(stream).withHeader("Content-Type", "text/event-stream")));
         List<Event> received = new ArrayList<>();
         GenesisDbException e = assertThrows(GenesisDbException.class,
                 () -> db.subscribe("/customer", new SubscribeOptions().interval(Duration.ofMillis(500)), received::add));
         assertTrue(e.getMessage().contains("store closed"));
         assertEquals(2, received.size());
-        server.verify(postRequestedFor(urlEqualTo("/api/v1/subscribe")).withRequestBody(equalToJson("{\"subject\":\"/customer\",\"interval\":0.5}")));
+        server.verify(postRequestedFor(urlEqualTo("/api/v2/subscribe")).withRequestBody(equalToJson("{\"subject\":\"/customer\",\"interval\":0.5}")));
     }
 
     @Test
     void subscribeThrowsOnHttpError() {
-        server.stubFor(post("/api/v1/subscribe").willReturn(status(401).withBody("denied")));
+        server.stubFor(post("/api/v2/subscribe").willReturn(status(401).withBody("denied")));
         assertThrows(AuthenticationException.class, () -> db.subscribe("/customer", null, e -> fail("no event expected")));
     }
 }
