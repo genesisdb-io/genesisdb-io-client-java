@@ -25,6 +25,17 @@ jobs:
       - name: Tag
         run: |
           version="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          # A rerun after a failed deploy finds the tag of the first attempt. Reuse it only
+          # when it points to the commit being released, never move an existing tag.
+          existing="$(git ls-remote --tags origin "refs/tags/v$version^{}" | cut -f1)"
+          if [ -n "$existing" ]; then
+            if [ "$existing" != "$GITHUB_SHA" ]; then
+              echo "v$version already tags $existing, not $GITHUB_SHA" >&2
+              exit 1
+            fi
+            echo "v$version already tags this commit, reusing it"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v$version" -m "v$version"
